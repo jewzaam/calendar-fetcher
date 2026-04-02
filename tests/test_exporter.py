@@ -249,7 +249,7 @@ def test_process_artifact_unsupported_mime(tmp_path):
     )
 
     # Verify note is set
-    assert "Unsupported MIME type" in result.note
+    assert "unsupported type" in result.note
 
 
 def test_process_event_with_meet(tmp_path, sample_event):
