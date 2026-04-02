@@ -72,6 +72,7 @@ def test_process_artifact_google_doc(tmp_path, sample_artifact):
             "doc123", str(expected_path)
         )
         assert expected_path.exists()
+        assert expected_path.read_text() == "# Exported Markdown"
         assert artifact.local_file == str(expected_path)
 
 
@@ -120,9 +121,11 @@ def test_process_artifact_google_sheets(tmp_path):
         # Verify each tab was exported
         assert mock_drive.fetch_sheet_tab_data.call_count == 2
 
-        # Verify files were created
+        # Verify files were created with correct content
         assert csv_path_q1.exists()
+        assert csv_path_q1.read_text() == "data for Q1"
         assert csv_path_q2.exists()
+        assert csv_path_q2.read_text() == "data for Q2"
 
         # Verify local_file is set to first file
         assert result.local_file == str(csv_path_q1)
@@ -161,7 +164,8 @@ def test_process_artifact_slides_pdf(tmp_path):
         mock_drive.export_slides_as_pdf.assert_called_once_with(
             "slides123", str(output_path)
         )
-        # Verify local_file is set
+        # Verify file content and local_file is set
+        assert output_path.read_bytes() == b"%PDF-1.4"
         assert result.local_file == str(output_path)
 
 

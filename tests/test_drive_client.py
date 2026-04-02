@@ -2,7 +2,7 @@
 
 """Tests for Drive API client module."""
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from calendar_fetcher.drive_client import (
     export_doc_as_markdown,
@@ -10,6 +10,7 @@ from calendar_fetcher.drive_client import (
     fetch_sheet_tab_data,
     fetch_sheet_tabs,
     get_file_metadata,
+    list_folder_files,
 )
 from calendar_fetcher.gws import GWSError
 
@@ -197,3 +198,54 @@ class TestExportSlidesAsPdf:
             result = export_slides_as_pdf("slides123", str(output_path))
 
         assert result is None
+
+
+class TestListFolderFiles:
+    """Tests for list_folder_files function."""
+
+    @patch("calendar_fetcher.drive_client.run_gws")
+    def test_list_folder_files_paginates(self, mock_run_gws: MagicMock) -> None:
+        """Verify pagination follows nextPageToken until exhausted."""
+        mock_run_gws.side_effect = [
+            {
+                "files": [{"name": "file1.txt"}, {"name": "file2.txt"}],
+                "nextPageToken": "token_page2",
+            },
+            {
+                "files": [{"name": "file3.txt"}, {"name": "file4.txt"}],
+            },
+        ]
+
+        result = list_folder_files("folder123")
+
+        assert result == {"file1.txt", "file2.txt", "file3.txt", "file4.txt"}
+        assert mock_run_gws.call_count == 2
+
+        # First call has no pageToken
+        first_params = mock_run_gws.call_args_list[0][1]["params"]
+        assert "pageToken" not in first_params
+
+        # Second call includes pageToken from first response
+        second_params = mock_run_gws.call_args_list[1][1]["params"]
+        assert second_params["pageToken"] == "token_page2"
+
+    @patch("calendar_fetcher.drive_client.run_gws")
+    def test_list_folder_files_single_page(self, mock_run_gws: MagicMock) -> None:
+        """Verify single page response works without pagination."""
+        mock_run_gws.return_value = {
+            "files": [{"name": "only_file.txt"}],
+        }
+
+        result = list_folder_files("folder123")
+
+        assert result == {"only_file.txt"}
+        assert mock_run_gws.call_count == 1
+
+    @patch("calendar_fetcher.drive_client.run_gws")
+    def test_list_folder_files_error(self, mock_run_gws: MagicMock) -> None:
+        """Verify returns empty set on GWSError."""
+        mock_run_gws.side_effect = GWSError("API error")
+
+        result = list_folder_files("folder123")
+
+        assert result == set()

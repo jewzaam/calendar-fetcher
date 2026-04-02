@@ -12,6 +12,8 @@ EXIT_ERROR = 1
 LOG_MAX_BYTES = 2 * 1024 * 1024
 LOG_BACKUP_COUNT = 1
 
+STATE_FILENAME = "fetcher-state.json"
+
 # Supported Google Workspace MIME types and their export formats.
 EXPORT_MIME_MAP = {
     "application/vnd.google-apps.document": "md",

@@ -33,7 +33,7 @@ install-dev: $(PYTHON)  ## Install in editable mode with dev deps
 install-no-deps: $(PYTHON)  ## Install in editable mode without dependencies
 	$(PYTHON) -m pip install -e . --no-deps
 
-uninstall:  ## Uninstall package
+uninstall: $(PYTHON)  ## Uninstall package
 	$(PYTHON) -m pip uninstall -y $(PACKAGE_NAME)
 
 clean:  ## Remove build artifacts and caches

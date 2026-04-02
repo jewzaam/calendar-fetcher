@@ -142,18 +142,31 @@ def list_folder_files(folder_id: str) -> set[str]:
         Set of filenames in the folder, or empty set on error
     """
     try:
-        response = run_gws(
-            "drive",
-            "files",
-            "list",
-            params={
+        all_files: list[dict] = []
+        page_token: str | None = None
+
+        while True:
+            params: dict = {
                 "q": f'"{folder_id}" in parents',
-                "fields": "files(name)",
+                "fields": "nextPageToken,files(name)",
                 "pageSize": 1000,
-            },
-        )
-        files = response.get("files", [])
-        return {file["name"] for file in files}
+            }
+            if page_token is not None:
+                params["pageToken"] = page_token
+
+            response = run_gws(
+                "drive",
+                "files",
+                "list",
+                params=params,
+            )
+            all_files.extend(response.get("files", []))
+
+            page_token = response.get("nextPageToken")
+            if not page_token:
+                break
+
+        return {file["name"] for file in all_files}
     except GWSError as e:
         logger.warning(f"Failed to list files in folder {folder_id}: {e}")
         return set()

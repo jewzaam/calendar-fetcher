@@ -56,13 +56,14 @@ def create_parser() -> argparse.ArgumentParser:
         default=config.DEFAULT_OUTPUT_DIR,
         help="output directory for artifacts (default: calendar-artifacts)",
     )
-    fetch_parser.add_argument(
+    date_group = fetch_parser.add_mutually_exclusive_group()
+    date_group.add_argument(
         "--lookback-days",
         type=int,
         default=config.DEFAULT_LOOKBACK_DAYS,
         help="number of days to look back (default: 7)",
     )
-    fetch_parser.add_argument(
+    date_group.add_argument(
         "--date",
         help="process only a specific date (YYYY-MM-DD)",
     )
@@ -214,12 +215,14 @@ def handle_fetch(args: argparse.Namespace) -> None:
     check_auth_scopes(upload=bool(args.drive_folder_id))
 
     # Compute date range
+    output_dir = Path(args.output_dir)
     if args.date:
         time_min = f"{args.date}T00:00:00Z"
         time_max = f"{args.date}T23:59:59Z"
     else:
         today = date.today()
-        lookback = today - timedelta(days=args.lookback_days)
+        anchor = metadata.read_fetch_state(output_dir) or today
+        lookback = anchor - timedelta(days=args.lookback_days)
         time_min = f"{lookback.isoformat()}T00:00:00Z"
         time_max = f"{today.isoformat()}T23:59:59Z"
 
@@ -228,12 +231,12 @@ def handle_fetch(args: argparse.Namespace) -> None:
     parsed_events = [calendar_client.parse_event(e, args.calendar_id) for e in events]
 
     # Process events
-    output_dir = Path(args.output_dir)
     exporter.process_events(parsed_events, output_dir, dryrun=args.dryrun)
 
-    # Build index
+    # Build index and update state
     if not args.dryrun:
         metadata.build_and_write_index(output_dir)
+        metadata.write_fetch_state(output_dir)
 
     # Print summary
     if not args.quiet:
@@ -261,8 +264,12 @@ def handle_status(args: argparse.Namespace) -> None:
     # Count downloaded files
     total_files = 0
     for meta_file in meta_files:
-        with open(meta_file) as f:
-            data = json.load(f)
+        try:
+            with open(meta_file, encoding="utf-8") as f:
+                data = json.load(f)
+        except json.JSONDecodeError:
+            logger.warning(f"Skipping malformed metadata file: {meta_file}")
+            continue
         total_files += sum(
             1
             for artifact in data.get("artifacts", [])

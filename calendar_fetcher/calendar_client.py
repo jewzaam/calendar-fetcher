@@ -19,21 +19,30 @@ def list_events(calendar_id: str, time_min: str, time_max: str) -> list[dict]:
     Returns:
         List of event dicts from the API response
     """
-    response = run_gws(
-        "calendar",
-        "events",
-        "list",
-        params={
+    all_events: list[dict] = []
+    page_token: str | None = None
+
+    while True:
+        params: dict = {
             "calendarId": calendar_id,
             "timeMin": time_min,
             "timeMax": time_max,
             "singleEvents": True,
             "orderBy": "startTime",
-        },
-    )
-    events = response.get("items", [])
+        }
+        if page_token is not None:
+            params["pageToken"] = page_token
+
+        response = run_gws("calendar", "events", "list", params=params)
+        items = response.get("items", [])
+        all_events.extend(items)
+
+        page_token = response.get("nextPageToken")
+        if not page_token:
+            break
+
     # Filter out working location events (all-day events like "Home", "Office")
-    return [e for e in events if e.get("eventType") != "workingLocation"]
+    return [e for e in all_events if e.get("eventType") != "workingLocation"]
 
 
 def extract_attachments(event: dict) -> list[Artifact]:
