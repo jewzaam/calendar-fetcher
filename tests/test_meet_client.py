@@ -2,16 +2,14 @@
 
 """Tests for Meet API client module."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
-from calendar_fetcher.gws import GWSError
 from calendar_fetcher.meet_client import (
     get_all_meet_data,
     get_conference_record,
     get_participants,
     get_recordings,
     get_transcripts,
-    resolve_participant,
 )
 from calendar_fetcher.models import Artifact
 
@@ -165,11 +163,17 @@ class TestGetParticipants:
             "participants": [
                 {
                     "name": "conferenceRecords/abc/participants/12345",
-                    "earliestStartTime": "2024-01-01T10:00:00Z",
+                    "signedinUser": {
+                        "displayName": "John Doe",
+                        "user": "users/12345",
+                    },
                 },
                 {
                     "name": "conferenceRecords/abc/participants/67890",
-                    "earliestStartTime": "2024-01-01T10:05:00Z",
+                    "signedinUser": {
+                        "displayName": "Jane Smith",
+                        "user": "users/67890",
+                    },
                 },
             ]
         }
@@ -178,8 +182,8 @@ class TestGetParticipants:
             result = get_participants("conferenceRecords/abc-123")
 
         assert len(result) == 2
-        assert result[0]["name"] == "conferenceRecords/abc/participants/12345"
-        assert result[1]["name"] == "conferenceRecords/abc/participants/67890"
+        assert result[0]["signedinUser"]["displayName"] == "John Doe"
+        assert result[1]["signedinUser"]["displayName"] == "Jane Smith"
 
     def test_get_participants_empty(self):
         """Verify returns empty list when no participants."""
@@ -198,101 +202,6 @@ class TestGetParticipants:
             result = get_participants("conferenceRecords/abc-123")
 
         assert result == []
-
-
-class TestResolveParticipant:
-    """Tests for resolve_participant function."""
-
-    def test_resolve_participant_success(self):
-        """Verify extracts numeric ID and calls People API."""
-        mock_response = {
-            "names": [{"displayName": "John Doe"}],
-            "emailAddresses": [{"value": "john.doe@example.com"}],
-        }
-
-        with patch(
-            "calendar_fetcher.meet_client.run_gws", return_value=mock_response
-        ) as mock_run:
-            result = resolve_participant("conferenceRecords/abc/participants/12345")
-
-        assert result == {"name": "John Doe", "email": "john.doe@example.com"}
-        mock_run.assert_called_once_with(
-            "people",
-            "people",
-            "get",
-            params={
-                "resourceName": "people/12345",
-                "personFields": "names,emailAddresses",
-            },
-        )
-
-    def test_resolve_participant_error(self):
-        """Verify GWSError caught and returns None."""
-        with patch(
-            "calendar_fetcher.meet_client.run_gws",
-            side_effect=GWSError("API error"),
-        ):
-            result = resolve_participant("conferenceRecords/abc/participants/12345")
-
-        assert result is None
-
-    def test_resolve_participant_missing_name(self):
-        """Verify handles missing name field."""
-        mock_response = {
-            "emailAddresses": [{"value": "john.doe@example.com"}],
-        }
-
-        with patch("calendar_fetcher.meet_client.run_gws", return_value=mock_response):
-            result = resolve_participant("conferenceRecords/abc/participants/12345")
-
-        assert result == {"name": None, "email": "john.doe@example.com"}
-
-    def test_resolve_participant_missing_email(self):
-        """Verify handles missing email field."""
-        mock_response = {
-            "names": [{"displayName": "John Doe"}],
-        }
-
-        with patch("calendar_fetcher.meet_client.run_gws", return_value=mock_response):
-            result = resolve_participant("conferenceRecords/abc/participants/12345")
-
-        assert result == {"name": "John Doe", "email": None}
-
-    def test_resolve_participant_uses_cache(self):
-        """Verify cache hit prevents People API call."""
-        mock_cache = MagicMock()
-        cached_data = {"name": "Cached User", "email": "cached@example.com"}
-        mock_cache.get.return_value = cached_data
-
-        with patch("calendar_fetcher.meet_client.run_gws") as mock_run:
-            result = resolve_participant(
-                "conferenceRecords/abc/participants/12345", cache=mock_cache
-            )
-
-        assert result == cached_data
-        mock_cache.get.assert_called_once_with("12345")
-        mock_run.assert_not_called()
-
-    def test_resolve_participant_populates_cache(self):
-        """Verify cache miss triggers People API call and stores result."""
-        mock_cache = MagicMock()
-        mock_cache.get.return_value = None
-
-        mock_response = {
-            "names": [{"displayName": "New User"}],
-            "emailAddresses": [{"value": "new@example.com"}],
-        }
-
-        with patch("calendar_fetcher.meet_client.run_gws", return_value=mock_response):
-            result = resolve_participant(
-                "conferenceRecords/abc/participants/67890", cache=mock_cache
-            )
-
-        assert result == {"name": "New User", "email": "new@example.com"}
-        mock_cache.get.assert_called_once_with("67890")
-        mock_cache.set.assert_called_once_with(
-            "67890", {"name": "New User", "email": "new@example.com"}
-        )
 
 
 class TestGetAllMeetData:
@@ -337,14 +246,12 @@ class TestGetAllMeetData:
             "participants": [
                 {
                     "name": "conferenceRecords/abc-123/participants/12345",
-                    "earliestStartTime": "2024-01-01T10:00:00Z",
+                    "signedinUser": {
+                        "displayName": "John Doe",
+                        "user": "users/12345",
+                    },
                 }
             ]
-        }
-
-        people_response = {
-            "names": [{"displayName": "John Doe"}],
-            "emailAddresses": [{"value": "john.doe@example.com"}],
         }
 
         def mock_run_gws(*args, **kwargs):
@@ -356,29 +263,21 @@ class TestGetAllMeetData:
                 return recordings_response
             elif args[0] == "meet" and args[2] == "participants":
                 return participants_response
-            elif args[0] == "people":
-                return people_response
             return {}
 
         with patch("calendar_fetcher.meet_client.run_gws", side_effect=mock_run_gws):
             artifacts, api_response = get_all_meet_data("abc-defg-hij")
 
-        # Verify artifacts
         assert len(artifacts) == 2
         assert artifacts[0].type == "transcript"
         assert artifacts[1].type == "recording"
 
-        # Verify api_response structure
         assert "conference_record" in api_response
         assert "transcripts" in api_response
         assert "recordings" in api_response
         assert "participants" in api_response
         assert api_response["conference_record"]["name"] == "conferenceRecords/abc-123"
         assert len(api_response["participants"]) == 1
-        assert api_response["participants"][0]["resolved_identity"] == {
-            "name": "John Doe",
-            "email": "john.doe@example.com",
-        }
 
     def test_get_all_meet_data_no_conference(self):
         """Verify returns empty results when no conference record found."""
@@ -389,38 +288,3 @@ class TestGetAllMeetData:
 
         assert artifacts == []
         assert api_response == {}
-
-    def test_get_all_meet_data_participant_resolution_failure(self):
-        """Verify handles participant resolution errors gracefully."""
-        conference_response = {
-            "conferenceRecords": [
-                {
-                    "name": "conferenceRecords/abc-123",
-                    "space": {"meetingCode": "abc-defg-hij"},
-                }
-            ]
-        }
-
-        participants_response = {
-            "participants": [
-                {
-                    "name": "conferenceRecords/abc-123/participants/12345",
-                    "earliestStartTime": "2024-01-01T10:00:00Z",
-                }
-            ]
-        }
-
-        def mock_run_gws(*args, **kwargs):
-            if args[0] == "meet" and args[2] == "list":
-                return conference_response
-            elif args[0] == "meet" and args[2] == "participants":
-                return participants_response
-            elif args[0] == "people":
-                raise GWSError("People API error")
-            return {}
-
-        with patch("calendar_fetcher.meet_client.run_gws", side_effect=mock_run_gws):
-            artifacts, api_response = get_all_meet_data("abc-defg-hij")
-
-        # Should still return results, with None for failed resolution
-        assert api_response["participants"][0]["resolved_identity"] is None

@@ -4,8 +4,7 @@
 
 import logging
 
-from calendar_fetcher.cache import FileCache
-from calendar_fetcher.gws import GWSError, run_gws
+from calendar_fetcher.gws import run_gws
 from calendar_fetcher.models import Artifact
 
 logger = logging.getLogger(__name__)
@@ -14,11 +13,7 @@ logger = logging.getLogger(__name__)
 def get_conference_record(meet_code: str) -> dict | None:
     """Fetch conference record by meet code.
 
-    Args:
-        meet_code: The meeting code (e.g., "abc-defg-hij")
-
-    Returns:
-        First conference record dict, or None if not found
+    Returns first conference record dict, or None if not found.
     """
     response = run_gws(
         "meet",
@@ -33,11 +28,7 @@ def get_conference_record(meet_code: str) -> dict | None:
 def get_transcripts(conference_id: str) -> list[Artifact]:
     """Fetch transcripts for a conference.
 
-    Args:
-        conference_id: The conference record ID (e.g., "conferenceRecords/abc-123")
-
-    Returns:
-        List of transcript Artifacts
+    Returns list of transcript Artifacts.
     """
     response = run_gws(
         "meet",
@@ -71,11 +62,7 @@ def get_transcripts(conference_id: str) -> list[Artifact]:
 def get_recordings(conference_id: str) -> list[Artifact]:
     """Fetch recordings for a conference.
 
-    Args:
-        conference_id: The conference record ID (e.g., "conferenceRecords/abc-123")
-
-    Returns:
-        List of recording Artifacts
+    Returns list of recording Artifacts.
     """
     response = run_gws(
         "meet",
@@ -109,11 +96,8 @@ def get_recordings(conference_id: str) -> list[Artifact]:
 def get_participants(conference_id: str) -> list[dict]:
     """Fetch participants for a conference.
 
-    Args:
-        conference_id: The conference record ID (e.g., "conferenceRecords/abc-123")
-
-    Returns:
-        List of raw participant dicts
+    Returns list of raw participant dicts. Each participant includes
+    signedinUser.displayName and signedinUser.user from the Meet API.
     """
     response = run_gws(
         "meet",
@@ -125,91 +109,13 @@ def get_participants(conference_id: str) -> list[dict]:
     return response.get("participants", [])
 
 
-def resolve_participant(
-    participant_name: str, *, cache: FileCache | None = None
-) -> dict | None:
-    """Resolve participant identity via People API.
-
-    Args:
-        participant_name: The participant resource name
-            (e.g., "conferenceRecords/abc/participants/12345")
-        cache: Optional FileCache for caching participant data
-
-    Returns:
-        Dict with "name" and "email" keys, or None on error
-    """
-    # Extract numeric ID from participant name
-    # Format: conferenceRecords/abc/participants/12345 -> 12345
-    try:
-        numeric_id = participant_name.split("/")[-1]
-    except (AttributeError, IndexError):
-        logger.warning(
-            f"Could not extract ID from participant name: {participant_name}"
-        )
-        return None
-
-    # Check cache first
-    if cache is not None:
-        cached = cache.get(numeric_id)
-        if cached is not None:
-            return cached
-
-    try:
-        response = run_gws(
-            "people",
-            "people",
-            "get",
-            params={
-                "resourceName": f"people/{numeric_id}",
-                "personFields": "names,emailAddresses",
-            },
-        )
-
-        # Extract name and email
-        name = None
-        email = None
-
-        names = response.get("names", [])
-        if names:
-            name = names[0].get("displayName")
-
-        emails = response.get("emailAddresses", [])
-        if emails:
-            email = emails[0].get("value")
-
-        resolved = {"name": name, "email": email}
-
-        # Store in cache if available
-        if cache is not None and resolved is not None:
-            cache.set(numeric_id, resolved)
-
-        return resolved
-
-    except GWSError as e:
-        logger.warning(f"Error resolving participant {participant_name}: {e}")
-        return None
-
-
-def get_all_meet_data(
-    meet_code: str, *, cache: FileCache | None = None
-) -> tuple[list[Artifact], dict]:
+def get_all_meet_data(meet_code: str) -> tuple[list[Artifact], dict]:
     """Fetch all Meet data for a meeting code.
 
-    Orchestrates calls to get conference record, transcripts, recordings,
-    and participants, and resolves participant identities.
-
-    Args:
-        meet_code: The meeting code (e.g., "abc-defg-hij")
-        cache: Optional FileCache for caching participant data
-
-    Returns:
-        Tuple of (artifacts_list, api_response_dict) where api_response_dict contains:
-        - conference_record: The conference record dict
-        - transcripts: Raw transcripts response
-        - recordings: Raw recordings response
-        - participants: List of participant dicts with resolved_identity added
+    Returns (artifacts_list, api_response_dict). Participant identity
+    is available directly from the Meet API response (signedinUser)
+    and from the Calendar API attendees — no People API lookup needed.
     """
-    # Get conference record
     conference_record = get_conference_record(meet_code)
     if not conference_record:
         logger.info(f"No conference record found for meet code: {meet_code}")
@@ -217,20 +123,10 @@ def get_all_meet_data(
 
     conference_id = conference_record["name"]
 
-    # Fetch transcripts and recordings (these return Artifacts)
     transcripts_artifacts = get_transcripts(conference_id)
     recordings_artifacts = get_recordings(conference_id)
-
-    # Fetch participants (returns raw dicts)
     participants = get_participants(conference_id)
 
-    # Resolve participant identities
-    for participant in participants:
-        participant_name = participant.get("name", "")
-        resolved = resolve_participant(participant_name, cache=cache)
-        participant["resolved_identity"] = resolved
-
-    # Build API response dict
     api_response = {
         "conference_record": conference_record,
         "transcripts": (
@@ -246,7 +142,6 @@ def get_all_meet_data(
         "participants": participants,
     }
 
-    # Combine all artifacts
     all_artifacts = transcripts_artifacts + recordings_artifacts
 
     return (all_artifacts, api_response)

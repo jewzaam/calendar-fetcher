@@ -6,7 +6,6 @@ import logging
 from pathlib import Path
 
 from calendar_fetcher import drive_client, meet_client, metadata
-from calendar_fetcher.cache import FileCache
 from calendar_fetcher.config import EXPORT_MIME_MAP
 from calendar_fetcher.gws import GWSError
 from calendar_fetcher.models import Artifact, CalendarEvent, MeetingRecord
@@ -178,9 +177,8 @@ def process_event(
     # Fetch Meet data if available
     meet_api_response: dict[str, object] = {}
     if event.meet_code:
-        participant_cache = FileCache(output_dir / ".participant-cache.json")
         meet_artifacts, meet_api_response = meet_client.get_all_meet_data(
-            event.meet_code, cache=participant_cache
+            event.meet_code
         )
         all_artifacts.extend(meet_artifacts)
 

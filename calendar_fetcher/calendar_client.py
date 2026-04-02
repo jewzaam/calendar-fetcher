@@ -31,7 +31,9 @@ def list_events(calendar_id: str, time_min: str, time_max: str) -> list[dict]:
             "orderBy": "startTime",
         },
     )
-    return response.get("items", [])
+    events = response.get("items", [])
+    # Filter out working location events (all-day events like "Home", "Office")
+    return [e for e in events if e.get("eventType") != "workingLocation"]
 
 
 def extract_attachments(event: dict) -> list[Artifact]:

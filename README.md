@@ -24,7 +24,13 @@ cd calendar-fetcher
 make install-dev
 ```
 
-### From Git
+### From Git (pipx)
+
+```bash
+pipx install git+https://github.com/jewzaam/calendar-fetcher.git
+```
+
+### From Git (pip)
 
 ```bash
 pip install git+https://github.com/jewzaam/calendar-fetcher.git

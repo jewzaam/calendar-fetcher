@@ -75,6 +75,29 @@ class TestListEvents:
 
         assert result == []
 
+    @patch("calendar_fetcher.calendar_client.run_gws")
+    def test_list_events_filters_working_location(
+        self, mock_run_gws: MagicMock
+    ) -> None:
+        """Verify workingLocation events are excluded."""
+        mock_run_gws.return_value = {
+            "items": [
+                {"id": "event1", "summary": "Team Sync"},
+                {"id": "wl1", "summary": "Home", "eventType": "workingLocation"},
+                {"id": "event2", "summary": "Design Review"},
+            ]
+        }
+
+        result = list_events(
+            calendar_id="test@example.com",
+            time_min="2024-01-01T00:00:00Z",
+            time_max="2024-01-31T23:59:59Z",
+        )
+
+        assert len(result) == 2
+        assert result[0]["id"] == "event1"
+        assert result[1]["id"] == "event2"
+
 
 class TestExtractAttachments:
     """Tests for extract_attachments function."""
