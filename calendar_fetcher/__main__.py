@@ -119,9 +119,41 @@ def create_parser() -> argparse.ArgumentParser:
         default=config.DEFAULT_OUTPUT_DIR,
         help="output directory (default: calendar-artifacts)",
     )
+    status_parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="enable debug logging",
+    )
+    status_parser.add_argument(
+        "-q",
+        "--quiet",
+        action="store_true",
+        help="suppress info output",
+    )
+    status_parser.add_argument(
+        "--log-file",
+        help="write logs to file",
+    )
 
     # list-calendars subcommand
-    subparsers.add_parser("list-calendars", help="list available calendars")
+    list_parser = subparsers.add_parser(
+        "list-calendars", help="list available calendars"
+    )
+    list_parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="enable debug logging",
+    )
+    list_parser.add_argument(
+        "-q",
+        "--quiet",
+        action="store_true",
+        help="suppress info output",
+    )
+    list_parser.add_argument(
+        "--log-file",
+        help="write logs to file",
+    )
 
     return parser
 
@@ -160,9 +192,6 @@ def configure_logging(
     root_logger = logging.getLogger()
     root_logger.setLevel(level)
     root_logger.addHandler(handler)
-
-    # Install excepthook
-    _install_excepthook(logger=logging.getLogger("calendar_fetcher"))
 
 
 def handle_fetch(args: argparse.Namespace) -> None:
@@ -241,18 +270,20 @@ def handle_list_calendars(args: argparse.Namespace) -> None:
         print(f"{calendar_id}: {summary}")
 
 
-def main() -> None:
+def main() -> int:
     """Main entry point for the CLI."""
     parser = create_parser()
     args = parser.parse_args()
 
-    # Configure logging if the subcommand supports it
-    if hasattr(args, "debug"):
-        configure_logging(
-            debug=args.debug,
-            quiet=args.quiet,
-            log_file=args.log_file,
-        )
+    # Install excepthook unconditionally
+    _install_excepthook(logger=logging.getLogger("calendar_fetcher"))
+
+    # Configure logging
+    configure_logging(
+        debug=args.debug,
+        quiet=args.quiet,
+        log_file=args.log_file,
+    )
 
     # Dispatch to subcommand handler
     if args.subcommand == "fetch":
@@ -264,6 +295,8 @@ def main() -> None:
     elif args.subcommand == "list-calendars":
         handle_list_calendars(args)
 
+    return config.EXIT_SUCCESS
+
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

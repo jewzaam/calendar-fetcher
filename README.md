@@ -1,20 +1,42 @@
 # calendar-fetcher
 
+[![Test](https://github.com/jewzaam/calendar-fetcher/actions/workflows/test.yml/badge.svg)](https://github.com/jewzaam/calendar-fetcher/actions/workflows/test.yml) [![Coverage](https://github.com/jewzaam/calendar-fetcher/actions/workflows/coverage.yml/badge.svg)](https://github.com/jewzaam/calendar-fetcher/actions/workflows/coverage.yml) [![Lint](https://github.com/jewzaam/calendar-fetcher/actions/workflows/lint.yml/badge.svg)](https://github.com/jewzaam/calendar-fetcher/actions/workflows/lint.yml) [![Format](https://github.com/jewzaam/calendar-fetcher/actions/workflows/format.yml/badge.svg)](https://github.com/jewzaam/calendar-fetcher/actions/workflows/format.yml) [![Type Check](https://github.com/jewzaam/calendar-fetcher/actions/workflows/typecheck.yml/badge.svg)](https://github.com/jewzaam/calendar-fetcher/actions/workflows/typecheck.yml)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/) [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+
 Fetch and download artifacts from Google Calendar meetings into a flat, searchable directory with structured metadata.
 
-## Prerequisites
+## Overview
+
+- Query Google Calendar for events within a configurable lookback window
+- Collect attachments, description links, and Google Meet transcripts/recordings
+- Export Google Docs as markdown, Sheets as CSV, Slides as PDF
+- Generate per-meeting JSON metadata with raw API responses
+- Cache participant identities to reduce API calls across runs
+- Optionally upload results to a Google Drive folder
+
+## Installation
+
+### Development
+
+```bash
+git clone https://github.com/jewzaam/calendar-fetcher.git
+cd calendar-fetcher
+make install-dev
+```
+
+### From Git
+
+```bash
+pip install git+https://github.com/jewzaam/calendar-fetcher.git
+```
+
+### Prerequisites
 
 - Python 3.12+
 - [gws CLI](https://github.com/jewzaam/gws-cli) installed and on PATH
 - Google Cloud project with Calendar, Drive, Docs, Meet, and People APIs enabled
 
-## Installation
-
-```bash
-make install-dev
-```
-
-## Authentication
+### Authentication
 
 Authentication is managed via `gws auth login`. The tool checks for required scopes on startup and exits with an error if they are insufficient.
 
@@ -30,8 +52,6 @@ If you change scopes, log out first: `gws auth logout`.
 
 ## Usage
 
-### Fetch meeting artifacts
-
 ```bash
 # Fetch last 7 days from primary calendar
 calendar-fetcher fetch
@@ -45,13 +65,6 @@ calendar-fetcher fetch --calendar-id work@example.com --lookback-days 30
 # Dry run (show what would be downloaded)
 calendar-fetcher fetch --dryrun
 
-# Upload results to Google Drive
-calendar-fetcher fetch --drive-folder-id FOLDER_ID
-```
-
-### Other commands
-
-```bash
 # Regenerate metadata from stored API responses
 calendar-fetcher refresh-metadata
 
@@ -73,17 +86,13 @@ calendar-fetcher list-calendars
 | `--drive-folder-id` | | upload results to this Drive folder |
 | `--debug` | | enable debug logging |
 | `--dryrun` | | show what would be downloaded |
-| `--quiet` | | suppress non-essential output |
+| `--quiet` / `-q` | | suppress non-essential output |
 | `--log-file` | | write log output to file |
 
 ## Development
 
 ```bash
 make check       # format, lint, typecheck, test, coverage
-make test         # run tests only
-make help         # show all targets
+make test        # run tests only
+make help        # show all targets
 ```
-
-## License
-
-Apache-2.0
