@@ -2,10 +2,22 @@
 
 """Shared test fixtures and guards."""
 
+import multiprocessing
 import subprocess
 from pathlib import Path
 
 import pytest
+
+# mutmut 2.x workaround for Python 3.13+: set_start_method('fork') fails
+# without force=True because the context is locked after first access.
+_orig_set_start_method = multiprocessing.set_start_method
+
+
+def _patched_set_start_method(method, force=False):  # noqa: E302
+    _orig_set_start_method(method, force=True)
+
+
+multiprocessing.set_start_method = _patched_set_start_method
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
