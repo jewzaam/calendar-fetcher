@@ -33,3 +33,7 @@ calendar-fetcher = "calendar_fetcher.__main__:main"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["calendar_fetcher*"]
+
+[tool.mutmut]
+paths_to_mutate = ["calendar_fetcher/"]
+also_copy = ["conftest.py"]
