@@ -87,3 +87,30 @@ def test_extract_date_empty_string():
 
 def test_extract_date_short_string():
     assert extract_date("2024-01") == ""
+
+
+def test_build_filename_truncates_long_titles():
+    long_meeting = "a" * 200
+    long_doc = "b" * 200
+    result = build_filename(
+        date="2026-04-01",
+        meeting_title=long_meeting,
+        document_title=long_doc,
+        document_id="abc123",
+        ext="md",
+    )
+    assert len(result) <= 255
+
+
+def test_build_filename_truncation_preserves_document_id():
+    long_meeting = "ansible-priority-review-" * 20
+    long_doc = "notes-" * 40
+    result = build_filename(
+        date="2026-03-12",
+        meeting_title=long_meeting,
+        document_title=long_doc,
+        document_id="117tc8rk3KHPNX8TqWj68RU4N6uRccgw",
+        ext="md",
+    )
+    assert len(result) <= 255
+    assert "117tc8rk3KHPNX8TqWj68RU4N6uRccgw" in result

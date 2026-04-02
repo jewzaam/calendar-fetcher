@@ -38,18 +38,34 @@ def build_filename(
     ext: str,
     *,
     tab_name: str | None = None,
+    max_length: int = 255,
 ) -> str:
     """Build a flat-directory filename.
 
     Format: {date}_{meeting}_{doc}_{id}.{ext}
     With tab: {date}_{meeting}_{doc}_{id}_{tab}.{ext}
+
+    Truncates meeting and document title slugs to stay within max_length.
     """
-    parts = [
-        date,
-        slugify(meeting_title),
-        slugify(document_title),
-        document_id,
-    ]
-    if tab_name is not None:
-        parts.append(slugify(tab_name))
+    meeting_slug = slugify(meeting_title)
+    doc_slug = slugify(document_title)
+    tab_slug = slugify(tab_name) if tab_name is not None else None
+
+    # Fixed-length portions: date, document_id, ext, separators
+    fixed_len = len(date) + 1 + len(document_id) + 1 + len(ext)
+    if tab_slug is not None:
+        fixed_len += 1 + len(tab_slug)
+
+    # Budget remaining space for meeting_slug and doc_slug (plus 2 separators)
+    budget = max_length - fixed_len - 2
+    if budget < 2:
+        budget = 2
+
+    half = budget // 2
+    meeting_slug = meeting_slug[:half].rstrip("-")
+    doc_slug = doc_slug[:budget - len(meeting_slug)].rstrip("-")
+
+    parts = [date, meeting_slug, doc_slug, document_id]
+    if tab_slug is not None:
+        parts.append(tab_slug)
     return "_".join(parts) + f".{ext}"

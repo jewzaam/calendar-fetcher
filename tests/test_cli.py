@@ -346,3 +346,58 @@ def test_handle_list_calendars_prints_calendars(mock_run_gws, capsys):
     assert "primary" in captured.out
     assert "Test Calendar" in captured.out
     assert "test@example.com" in captured.out
+
+
+def test_main_resolves_tilde_in_output_dir():
+    """Verify ~ in --output-dir is expanded to home directory."""
+    from calendar_fetcher.__main__ import main
+
+    with patch("calendar_fetcher.__main__.handle_fetch") as mock_handler:
+        with patch(
+            "sys.argv",
+            ["calendar-fetcher", "fetch", "--output-dir", "~/my-artifacts"],
+        ):
+            main()
+
+        resolved = mock_handler.call_args[0][0].output_dir
+        assert "~" not in resolved
+        assert resolved == str(Path.home() / "my-artifacts")
+
+
+def test_main_resolves_tilde_in_log_file():
+    """Verify ~ in --log-file is expanded to home directory."""
+    from calendar_fetcher.__main__ import main
+
+    with (
+        patch("calendar_fetcher.__main__.handle_fetch") as mock_handler,
+        patch("calendar_fetcher.__main__.configure_logging"),
+    ):
+        with patch(
+            "sys.argv",
+            [
+                "calendar-fetcher",
+                "fetch",
+                "--log-file",
+                "~/logs/fetch.log",
+            ],
+        ):
+            main()
+
+        resolved = mock_handler.call_args[0][0].log_file
+        assert "~" not in resolved
+        assert resolved == str(Path.home() / "logs" / "fetch.log")
+
+
+def test_main_resolves_relative_output_dir():
+    """Verify relative --output-dir is resolved to absolute path."""
+    from calendar_fetcher.__main__ import main
+
+    with patch("calendar_fetcher.__main__.handle_fetch") as mock_handler:
+        with patch(
+            "sys.argv",
+            ["calendar-fetcher", "fetch", "--output-dir", "relative/path"],
+        ):
+            main()
+
+        resolved = mock_handler.call_args[0][0].output_dir
+        assert Path(resolved).is_absolute()

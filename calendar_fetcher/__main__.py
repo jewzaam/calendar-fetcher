@@ -298,6 +298,12 @@ def main() -> int:
     parser = create_parser()
     args = parser.parse_args()
 
+    # Resolve paths: expand ~ and make absolute
+    if hasattr(args, "output_dir"):
+        args.output_dir = str(Path(args.output_dir).expanduser().resolve())
+    if hasattr(args, "log_file") and args.log_file:
+        args.log_file = str(Path(args.log_file).expanduser().resolve())
+
     # Install excepthook unconditionally
     _install_excepthook(logger=logging.getLogger("calendar_fetcher"))
 
