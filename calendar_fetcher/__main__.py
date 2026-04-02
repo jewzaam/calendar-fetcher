@@ -43,6 +43,8 @@ def create_parser() -> argparse.ArgumentParser:
     fetch_parser = subparsers.add_parser(
         "fetch",
         help="fetch meeting artifacts for a date range",
+        description="query Google Calendar for events and download attached "
+        "documents, Meet transcripts, and recordings as portable files",
     )
     fetch_parser.add_argument(
         "--calendar-id",
@@ -93,6 +95,8 @@ def create_parser() -> argparse.ArgumentParser:
     refresh_parser = subparsers.add_parser(
         "refresh-metadata",
         help="regenerate metadata from stored api responses",
+        description="re-extract top-level fields from the raw api responses "
+        "stored in .meta.json files without calling any Google APIs",
     )
     refresh_parser.add_argument(
         "--output-dir",
@@ -117,7 +121,10 @@ def create_parser() -> argparse.ArgumentParser:
 
     # status subcommand
     status_parser = subparsers.add_parser(
-        "status", help="show counts of meetings and downloaded artifacts"
+        "status",
+        help="show counts of meetings and downloaded artifacts",
+        description="scan the output directory and report how many meetings "
+        "have been processed and how many artifacts downloaded",
     )
     status_parser.add_argument(
         "--output-dir",
@@ -142,7 +149,9 @@ def create_parser() -> argparse.ArgumentParser:
 
     # list-calendars subcommand
     list_parser = subparsers.add_parser(
-        "list-calendars", help="list available calendars"
+        "list-calendars",
+        help="list available calendars",
+        description="show all calendars accessible by the authenticated account",
     )
     list_parser.add_argument(
         "--debug",

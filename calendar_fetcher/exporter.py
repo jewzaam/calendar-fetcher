@@ -36,8 +36,11 @@ def process_artifact(
     """
     # Check if MIME type is supported
     if artifact.mime_type not in EXPORT_MIME_MAP:
-        artifact.note = f"Unsupported MIME type: {artifact.mime_type}"
-        logger.info(f"Skipping {artifact.title}: {artifact.note}")
+        artifact.note = f"Skipped: unsupported type ({artifact.mime_type or 'unknown'})"
+        logger.debug(
+            f"Skipping {artifact.title or artifact.type}: "
+            f"unsupported MIME type {artifact.mime_type or 'unknown'}"
+        )
         return artifact
 
     ext = EXPORT_MIME_MAP[artifact.mime_type]
@@ -227,11 +230,27 @@ def process_events(
     downloaded = sum(
         1 for r in records for a in r.artifacts if a.local_file is not None
     )
-    errors = sum(1 for r in records for a in r.artifacts if a.note is not None)
-
-    logger.info(
-        f"Processed {len(events)} events, {total_artifacts} artifacts "
-        f"({downloaded} downloaded, {errors} errors)"
+    skipped = sum(
+        1
+        for r in records
+        for a in r.artifacts
+        if a.note is not None and a.note.startswith("Skipped:")
     )
+    failed = sum(
+        1
+        for r in records
+        for a in r.artifacts
+        if a.note is not None and not a.note.startswith("Skipped:")
+    )
+
+    parts = [
+        f"Processed {len(events)} events, {total_artifacts} artifacts",
+        f"({downloaded} downloaded",
+    ]
+    if skipped:
+        parts.append(f"{skipped} skipped")
+    if failed:
+        parts.append(f"{failed} failed")
+    logger.info(", ".join(parts) + ")")
 
     return records
