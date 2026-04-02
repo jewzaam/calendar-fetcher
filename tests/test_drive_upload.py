@@ -33,7 +33,7 @@ def test_list_folder_files_success(mock_run_gws):
         "list",
         params={
             "q": '"folder123" in parents',
-            "fields": "files(name)",
+            "fields": "nextPageToken,files(name)",
             "pageSize": 1000,
         },
     )

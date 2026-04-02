@@ -11,7 +11,9 @@ from calendar_fetcher.metadata import (
     build_index_entry,
     build_meeting_metadata,
     metadata_filename,
+    read_fetch_state,
     refresh_all_metadata,
+    write_fetch_state,
     write_metadata,
 )
 from calendar_fetcher.models import Artifact, CalendarEvent, MeetingRecord
@@ -357,3 +359,57 @@ def test_refresh_all_metadata_multiple_files(tmp_path):
         with open(tmp_path / f"test{i}.meta.json") as f:
             updated = json.load(f)
         assert updated["summary"] == f"Updated {i}"
+
+
+def test_write_fetch_state(tmp_path):
+    """Test write_fetch_state creates state file with modified_on."""
+    path = write_fetch_state(tmp_path)
+
+    assert path.exists()
+    with open(path) as f:
+        state = json.load(f)
+    assert "modified_on" in state
+    # Verify it's a valid ISO timestamp
+    from datetime import datetime
+
+    datetime.fromisoformat(state["modified_on"])
+
+
+def test_read_fetch_state(tmp_path):
+    """Test read_fetch_state returns date from state file."""
+    from datetime import date
+
+    state = {"modified_on": "2026-03-28T15:30:00+00:00"}
+    with open(tmp_path / "fetcher-state.json", "w") as f:
+        json.dump(state, f)
+
+    result = read_fetch_state(tmp_path)
+
+    assert result == date(2026, 3, 28)
+
+
+def test_read_fetch_state_missing_file(tmp_path):
+    """Test read_fetch_state returns None when no state file exists."""
+    result = read_fetch_state(tmp_path)
+
+    assert result is None
+
+
+def test_read_fetch_state_malformed(tmp_path):
+    """Test read_fetch_state returns None for malformed state file."""
+    with open(tmp_path / "fetcher-state.json", "w") as f:
+        f.write("not json")
+
+    result = read_fetch_state(tmp_path)
+
+    assert result is None
+
+
+def test_read_fetch_state_missing_field(tmp_path):
+    """Test read_fetch_state returns None when modified_on is absent."""
+    with open(tmp_path / "fetcher-state.json", "w") as f:
+        json.dump({"other_field": "value"}, f)
+
+    result = read_fetch_state(tmp_path)
+
+    assert result is None

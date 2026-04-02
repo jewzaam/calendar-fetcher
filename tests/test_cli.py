@@ -8,6 +8,8 @@ from datetime import date, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from calendar_fetcher.__main__ import create_parser
 from calendar_fetcher import config
 
@@ -37,7 +39,7 @@ def test_fetch_with_date():
 
 
 def test_fetch_with_all_options():
-    """Verify all fetch options can be set."""
+    """Verify all fetch options can be set (using --date, not --lookback-days)."""
     parser = create_parser()
     args = parser.parse_args(
         [
@@ -46,8 +48,6 @@ def test_fetch_with_all_options():
             "test@example.com",
             "--output-dir",
             "/tmp/output",
-            "--lookback-days",
-            "14",
             "--date",
             "2024-03-15",
             "--drive-folder-id",
@@ -62,7 +62,6 @@ def test_fetch_with_all_options():
 
     assert args.calendar_id == "test@example.com"
     assert args.output_dir == "/tmp/output"
-    assert args.lookback_days == 14
     assert args.date == "2024-03-15"
     assert args.drive_folder_id == "abc123"
     assert args.debug is True
@@ -143,6 +142,7 @@ def test_handle_fetch_processes_events(
     mock_parsed_events = [{"event_id": "event1"}, {"event_id": "event2"}]
     mock_calendar_client.list_events.return_value = mock_events
     mock_calendar_client.parse_event.side_effect = mock_parsed_events
+    mock_metadata.read_fetch_state.return_value = None
 
     # Create args
     args = argparse.Namespace(
@@ -158,7 +158,7 @@ def test_handle_fetch_processes_events(
     # Execute
     handle_fetch(args)
 
-    # Compute expected date range
+    # Compute expected date range (no state file → anchor from today)
     today = date.today()
     lookback = today - timedelta(days=7)
     expected_time_min = f"{lookback.isoformat()}T00:00:00Z"
@@ -225,6 +225,7 @@ def test_handle_fetch_dryrun_skips_index(
 
     # Setup mocks
     mock_calendar_client.list_events.return_value = []
+    mock_metadata.read_fetch_state.return_value = None
 
     # Create args
     args = argparse.Namespace(
@@ -244,8 +245,9 @@ def test_handle_fetch_dryrun_skips_index(
     mock_exporter.process_events.assert_called_once()
     assert mock_exporter.process_events.call_args[1]["dryrun"] is True
 
-    # Verify index NOT built
+    # Verify index NOT built and state NOT written
     mock_metadata.build_and_write_index.assert_not_called()
+    mock_metadata.write_fetch_state.assert_not_called()
 
 
 @patch("calendar_fetcher.__main__.metadata")
@@ -401,3 +403,89 @@ def test_main_resolves_relative_output_dir():
 
         resolved = mock_handler.call_args[0][0].output_dir
         assert Path(resolved).is_absolute()
+
+
+@patch("calendar_fetcher.__main__.metadata")
+@patch("calendar_fetcher.__main__.exporter")
+@patch("calendar_fetcher.__main__.calendar_client")
+@patch("calendar_fetcher.__main__.check_auth_scopes")
+def test_handle_fetch_anchors_lookback_from_state(
+    mock_check_auth, mock_calendar_client, mock_exporter, mock_metadata
+):
+    """Verify lookback is anchored from state file date, not today."""
+    from calendar_fetcher.__main__ import handle_fetch
+
+    mock_calendar_client.list_events.return_value = []
+    # Simulate last run was 2026-03-28 (Friday)
+    mock_metadata.read_fetch_state.return_value = date(2026, 3, 28)
+
+    args = argparse.Namespace(
+        calendar_id="primary",
+        output_dir="calendar-artifacts",
+        lookback_days=7,
+        date=None,
+        drive_folder_id=None,
+        dryrun=False,
+        quiet=True,
+    )
+
+    handle_fetch(args)
+
+    # time_min should be 2026-03-28 - 7 = 2026-03-21
+    call_args = mock_calendar_client.list_events.call_args[0]
+    assert call_args[1] == "2026-03-21T00:00:00Z"
+    # time_max should be today
+    today = date.today()
+    assert call_args[2] == f"{today.isoformat()}T23:59:59Z"
+
+
+@patch("calendar_fetcher.__main__.metadata")
+@patch("calendar_fetcher.__main__.exporter")
+@patch("calendar_fetcher.__main__.calendar_client")
+@patch("calendar_fetcher.__main__.check_auth_scopes")
+def test_handle_fetch_writes_state_after_success(
+    mock_check_auth, mock_calendar_client, mock_exporter, mock_metadata
+):
+    """Verify write_fetch_state is called after successful non-dryrun fetch."""
+    from calendar_fetcher.__main__ import handle_fetch
+
+    mock_calendar_client.list_events.return_value = []
+    mock_metadata.read_fetch_state.return_value = None
+
+    args = argparse.Namespace(
+        calendar_id="primary",
+        output_dir="calendar-artifacts",
+        lookback_days=7,
+        date=None,
+        drive_folder_id=None,
+        dryrun=False,
+        quiet=True,
+    )
+
+    handle_fetch(args)
+
+    mock_metadata.write_fetch_state.assert_called_once_with(Path("calendar-artifacts"))
+
+
+def test_lookback_days_non_default_value():
+    """Verify --lookback-days accepts a non-default integer value."""
+    parser = create_parser()
+    args = parser.parse_args(["fetch", "--lookback-days", "14"])
+
+    assert args.lookback_days == 14
+
+
+def test_lookback_days_invalid_value():
+    """Verify --lookback-days rejects non-integer input."""
+    parser = create_parser()
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["fetch", "--lookback-days", "not-a-number"])
+
+
+def test_date_and_lookback_days_mutually_exclusive():
+    """Verify --date and --lookback-days cannot be used together."""
+    parser = create_parser()
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["fetch", "--date", "2026-03-28", "--lookback-days", "7"])

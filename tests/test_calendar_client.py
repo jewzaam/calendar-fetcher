@@ -41,6 +41,45 @@ class TestListEvents:
         )
 
     @patch("calendar_fetcher.calendar_client.run_gws")
+    def test_list_events_paginates(self, mock_run_gws: MagicMock) -> None:
+        """Verify pagination follows nextPageToken until exhausted."""
+        mock_run_gws.side_effect = [
+            {
+                "items": [{"id": "event1"}],
+                "nextPageToken": "token_page2",
+            },
+            {
+                "items": [{"id": "event2"}],
+                "nextPageToken": "token_page3",
+            },
+            {
+                "items": [{"id": "event3"}],
+            },
+        ]
+
+        result = list_events(
+            calendar_id="test@example.com",
+            time_min="2024-01-01T00:00:00Z",
+            time_max="2024-01-31T23:59:59Z",
+        )
+
+        assert len(result) == 3
+        assert [e["id"] for e in result] == ["event1", "event2", "event3"]
+        assert mock_run_gws.call_count == 3
+
+        # First call has no pageToken
+        first_params = mock_run_gws.call_args_list[0][1]["params"]
+        assert "pageToken" not in first_params
+
+        # Second call includes pageToken from first response
+        second_params = mock_run_gws.call_args_list[1][1]["params"]
+        assert second_params["pageToken"] == "token_page2"
+
+        # Third call includes pageToken from second response
+        third_params = mock_run_gws.call_args_list[2][1]["params"]
+        assert third_params["pageToken"] == "token_page3"
+
+    @patch("calendar_fetcher.calendar_client.run_gws")
     def test_list_events_returns_items(self, mock_run_gws: MagicMock) -> None:
         """Return event items from API response."""
         mock_run_gws.return_value = {

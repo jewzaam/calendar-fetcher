@@ -4,8 +4,11 @@
 
 import json
 import logging
+from datetime import date, datetime, timezone
 from pathlib import Path
 
+from calendar_fetcher.calendar_client import parse_event
+from calendar_fetcher.config import STATE_FILENAME
 from calendar_fetcher.models import MeetingRecord
 from calendar_fetcher.naming import extract_date, slugify
 
@@ -95,7 +98,7 @@ def write_metadata(metadata: dict, output_dir: Path, filename: str) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
     output_path = output_dir / filename
 
-    with open(output_path, "w") as f:
+    with open(output_path, "w", encoding="utf-8") as f:
         json.dump(metadata, f, indent=2)
 
     logger.info(f"Wrote metadata to {output_path}")
@@ -114,8 +117,12 @@ def build_and_write_index(output_dir: Path) -> Path:
 
     # Find all .meta.json files
     for meta_file in sorted(output_dir.glob("*.meta.json")):
-        with open(meta_file) as f:
-            metadata = json.load(f)
+        try:
+            with open(meta_file, encoding="utf-8") as f:
+                metadata = json.load(f)
+        except json.JSONDecodeError:
+            logger.warning(f"Skipping malformed metadata file: {meta_file}")
+            continue
         entry = build_index_entry(metadata, meta_file.name)
         index_entries.append(entry)
 
@@ -124,7 +131,7 @@ def build_and_write_index(output_dir: Path) -> Path:
 
     # Write index
     index_path = output_dir / "index.json"
-    with open(index_path, "w") as f:
+    with open(index_path, "w", encoding="utf-8") as f:
         json.dump(index_entries, f, indent=2)
 
     logger.info(f"Wrote index with {len(index_entries)} entries to {index_path}")
@@ -142,24 +149,24 @@ def refresh_all_metadata(output_dir: Path) -> int:
     count = 0
 
     for meta_file in sorted(output_dir.glob("*.meta.json")):
-        with open(meta_file) as f:
-            metadata = json.load(f)
+        try:
+            with open(meta_file, encoding="utf-8") as f:
+                metadata = json.load(f)
+        except json.JSONDecodeError:
+            logger.warning(f"Skipping malformed metadata file: {meta_file}")
+            continue
 
-        # Extract updated fields from calendar API response
+        # Extract updated fields from calendar API response via parse_event
         calendar_response = metadata["api_responses"]["calendar"]
+        parsed = parse_event(calendar_response, metadata["calendar_id"])
 
-        # Update top-level fields from API response
-        if "summary" in calendar_response:
-            metadata["summary"] = calendar_response["summary"]
-        if "start" in calendar_response and "dateTime" in calendar_response["start"]:
-            metadata["start"] = calendar_response["start"]["dateTime"]
-        if "end" in calendar_response and "dateTime" in calendar_response["end"]:
-            metadata["end"] = calendar_response["end"]["dateTime"]
-        if "recurringEventId" in calendar_response:
-            metadata["recurring_event_id"] = calendar_response["recurringEventId"]
+        metadata["summary"] = parsed.summary
+        metadata["start"] = parsed.start
+        metadata["end"] = parsed.end
+        metadata["recurring_event_id"] = parsed.recurring_event_id
 
         # Write updated metadata
-        with open(meta_file, "w") as f:
+        with open(meta_file, "w", encoding="utf-8") as f:
             json.dump(metadata, f, indent=2)
 
         logger.info(f"Refreshed {meta_file.name}")
@@ -167,3 +174,39 @@ def refresh_all_metadata(output_dir: Path) -> int:
 
     logger.info(f"Refreshed {count} metadata files")
     return count
+
+
+def write_fetch_state(output_dir: Path) -> Path:
+    """Write fetch state with current UTC timestamp.
+
+    Returns the path to the state file.
+    """
+    state_path = output_dir / STATE_FILENAME
+    state = {"modified_on": datetime.now(timezone.utc).isoformat()}
+
+    with open(state_path, "w", encoding="utf-8") as f:
+        json.dump(state, f, indent=2)
+
+    logger.debug(f"Wrote fetch state to {state_path}")
+    return state_path
+
+
+def read_fetch_state(output_dir: Path) -> date | None:
+    """Read last fetch date from state file.
+
+    Returns the date portion of modified_on, or None if the state file
+    is missing or malformed.
+    """
+    state_path = output_dir / STATE_FILENAME
+    if not state_path.exists():
+        return None
+
+    try:
+        with open(state_path, encoding="utf-8") as f:
+            state = json.load(f)
+        modified_on = state.get("modified_on")
+        if not modified_on:
+            return None
+        return datetime.fromisoformat(modified_on).date()
+    except (json.JSONDecodeError, ValueError, KeyError):
+        return None
