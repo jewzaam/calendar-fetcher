@@ -63,7 +63,8 @@ def build_filename(
 
     half = budget // 2
     meeting_slug = meeting_slug[:half].rstrip("-")
-    doc_slug = doc_slug[:budget - len(meeting_slug)].rstrip("-")
+    doc_budget = budget - len(meeting_slug)
+    doc_slug = doc_slug[:doc_budget].rstrip("-")
 
     parts = [date, meeting_slug, doc_slug, document_id]
     if tab_slug is not None:
