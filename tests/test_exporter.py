@@ -3,7 +3,7 @@
 """Tests for exporter orchestration module."""
 
 from pathlib import Path
-from unittest.mock import ANY, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -278,7 +278,7 @@ def test_process_event_with_meet(tmp_path, sample_event):
         record = process_event(sample_event, tmp_path, dryrun=False)
 
         # Verify Meet API was called
-        mock_meet.get_all_meet_data.assert_called_once_with("abc-defg-hij", cache=ANY)
+        mock_meet.get_all_meet_data.assert_called_once_with("abc-defg-hij")
 
         # Verify record contains both attachment and transcript
         assert len(record.artifacts) == 2

@@ -342,5 +342,7 @@ def test_handle_list_calendars_prints_calendars(mock_run_gws, capsys):
 
     # Verify output
     captured = capsys.readouterr()
-    assert "primary: Primary Calendar" in captured.out
-    assert "test@example.com: Test Calendar" in captured.out
+    assert "Primary Calendar" in captured.out
+    assert "primary" in captured.out
+    assert "Test Calendar" in captured.out
+    assert "test@example.com" in captured.out

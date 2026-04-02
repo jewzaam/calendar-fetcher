@@ -40,7 +40,10 @@ def create_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="subcommand", required=True)
 
     # fetch subcommand
-    fetch_parser = subparsers.add_parser("fetch", help="fetch calendar events")
+    fetch_parser = subparsers.add_parser(
+        "fetch",
+        help="fetch meeting artifacts for a date range",
+    )
     fetch_parser.add_argument(
         "--calendar-id",
         default=config.DEFAULT_CALENDAR_ID,
@@ -89,7 +92,7 @@ def create_parser() -> argparse.ArgumentParser:
     # refresh-metadata subcommand
     refresh_parser = subparsers.add_parser(
         "refresh-metadata",
-        help="refresh metadata from api responses",
+        help="regenerate metadata from stored api responses",
     )
     refresh_parser.add_argument(
         "--output-dir",
@@ -113,7 +116,9 @@ def create_parser() -> argparse.ArgumentParser:
     )
 
     # status subcommand
-    status_parser = subparsers.add_parser("status", help="show artifact statistics")
+    status_parser = subparsers.add_parser(
+        "status", help="show counts of meetings and downloaded artifacts"
+    )
     status_parser.add_argument(
         "--output-dir",
         default=config.DEFAULT_OUTPUT_DIR,
@@ -264,10 +269,19 @@ def handle_list_calendars(args: argparse.Namespace) -> None:
     result = run_gws("calendar", "calendarList", "list")
     items = result.get("items", [])
 
+    if not items:
+        print("No calendars found")
+        return
+
+    # Find max summary length for alignment
+    max_summary = max(len(item.get("summary", "")) for item in items)
+    col_width = min(max_summary, 40)
+
     for item in items:
-        calendar_id = item.get("id", "")
         summary = item.get("summary", "")
-        print(f"{calendar_id}: {summary}")
+        calendar_id = item.get("id", "")
+        primary = " (primary)" if item.get("primary") else ""
+        print(f"{summary:<{col_width}}  {calendar_id}{primary}")
 
 
 def main() -> int:
