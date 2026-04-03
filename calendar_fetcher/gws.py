@@ -6,6 +6,7 @@ import json
 import logging
 import subprocess
 import sys
+import time
 
 from calendar_fetcher.config import EXIT_ERROR
 
@@ -31,31 +32,55 @@ class GWSError(Exception):
     """Raised when a gws CLI command fails."""
 
 
+_QUOTA_BACKOFF_SCHEDULE = [5, 10, 15]
+_MAX_QUOTA_RETRIES = 10
+
+
 def _run_gws_cmd(cmd: list[str], label: str) -> dict:
-    """Execute a gws command with timeout retry and JSON parsing."""
-    logger.debug(f"Running: {' '.join(cmd)}")
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-    except subprocess.TimeoutExpired:
-        raise GWSError(f"gws {label} timed out after 60 seconds")
+    """Execute a gws command with timeout retry, quota backoff, and JSON parsing."""
+    for attempt in range(_MAX_QUOTA_RETRIES + 1):
+        logger.debug(f"Running: {' '.join(cmd)}")
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        except subprocess.TimeoutExpired:
+            raise GWSError(f"gws {label} timed out after 60 seconds")
 
-    if result.returncode != 0:
-        stderr_lower = result.stderr.lower()
-        if "timeout" in stderr_lower or "timed out" in stderr_lower:
-            logger.warning(f"Timeout on gws {label}, retrying once")
-            try:
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-            except subprocess.TimeoutExpired:
-                raise GWSError(f"gws {label} timed out after 60 seconds")
         if result.returncode != 0:
-            raise GWSError(
-                f"gws {label} failed (exit {result.returncode}): "
-                f"{result.stderr.strip()}"
-            )
+            stderr_lower = result.stderr.lower()
 
-    if not result.stdout.strip():
-        return {}
-    return json.loads(result.stdout)
+            # Quota exceeded — backoff: 5s, 10s, then 15s steady
+            if "quota" in stderr_lower and attempt < _MAX_QUOTA_RETRIES:
+                schedule_idx = min(attempt, len(_QUOTA_BACKOFF_SCHEDULE) - 1)
+                wait = _QUOTA_BACKOFF_SCHEDULE[schedule_idx]
+                logger.warning(
+                    f"Quota exceeded on gws {label}, "
+                    f"waiting {wait}s before retry "
+                    f"({attempt + 1}/{_MAX_QUOTA_RETRIES})"
+                )
+                time.sleep(wait)
+                continue
+
+            # Timeout in stderr — retry once
+            if "timeout" in stderr_lower or "timed out" in stderr_lower:
+                logger.warning(f"Timeout on gws {label}, retrying once")
+                try:
+                    result = subprocess.run(
+                        cmd, capture_output=True, text=True, timeout=60
+                    )
+                except subprocess.TimeoutExpired:
+                    raise GWSError(f"gws {label} timed out after 60 seconds")
+
+            if result.returncode != 0:
+                raise GWSError(
+                    f"gws {label} failed (exit {result.returncode}): "
+                    f"{result.stderr.strip()}"
+                )
+
+        if not result.stdout.strip():
+            return {}
+        return json.loads(result.stdout)
+
+    raise GWSError(f"gws {label} failed after {_MAX_QUOTA_RETRIES} quota retries")
 
 
 def run_gws(

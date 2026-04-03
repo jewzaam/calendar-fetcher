@@ -117,6 +117,31 @@ class TestRunGWS:
         assert result == {"status": "ok"}
         assert mock_run.call_count == 2
 
+    def test_run_gws_retries_on_quota_exceeded(self):
+        """Verify retry with backoff when quota exceeded."""
+        quota_result = MagicMock()
+        quota_result.returncode = 1
+        quota_result.stdout = ""
+        quota_result.stderr = "error[api]: Quota exceeded for quota metric"
+
+        success_result = MagicMock()
+        success_result.returncode = 0
+        success_result.stdout = '{"status": "ok"}'
+        success_result.stderr = ""
+
+        with (
+            patch(
+                "subprocess.run",
+                side_effect=[quota_result, success_result],
+            ) as mock_run,
+            patch("calendar_fetcher.gws.time.sleep") as mock_sleep,
+        ):
+            result = run_gws("docs", "documents", "batchUpdate")
+
+        assert result == {"status": "ok"}
+        assert mock_run.call_count == 2
+        mock_sleep.assert_called_once_with(5)
+
     def test_run_gws_no_retry_on_non_timeout_error(self):
         """Verify no retry for other errors."""
         mock_result = MagicMock()

@@ -34,6 +34,11 @@ def write_state_key(output_dir: Path, key: str, value: object) -> Path:
     state_path = output_dir / STATE_FILENAME
     existing = read_state_file(output_dir)
     existing[key] = value
-    with open(state_path, "w", encoding="utf-8") as f:
-        json.dump(existing, f, indent=2)
+    tmp_path = state_path.with_suffix(".tmp")
+    try:
+        tmp_path.write_text(json.dumps(existing, indent=2), encoding="utf-8")
+        tmp_path.replace(state_path)
+    except BaseException:
+        tmp_path.unlink(missing_ok=True)
+        raise
     return state_path

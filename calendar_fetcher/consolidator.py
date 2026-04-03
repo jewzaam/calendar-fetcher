@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
-from calendar_fetcher.gws import run_gws, run_gws_write
+from calendar_fetcher.gws import GWSError, run_gws, run_gws_write
 
 logger = logging.getLogger(__name__)
 
@@ -297,6 +297,7 @@ def consolidate(output_dir: Path, output_doc_id: str) -> tuple[int, int, int]:
     created = 0
     updated = 0
     skipped = 0
+    failed = 0
 
     for file_id, info in sorted(doc_map.items()):
         tab_exists = file_id in existing_tabs
@@ -310,36 +311,42 @@ def consolidate(output_dir: Path, output_doc_id: str) -> tuple[int, int, int]:
             skipped += 1
             continue
 
-        header = _build_metadata_header(info)
-        content = info.local_path.read_text(encoding="utf-8")
-        content = _strip_embedded_images(content)
-        full_content = header + "\n" + content
+        try:
+            header = _build_metadata_header(info)
+            content = info.local_path.read_text(encoding="utf-8")
+            content = _strip_embedded_images(content)
+            full_content = header + "\n" + content
 
-        if tab_exists:
-            logger.info(f"Updating tab for changed doc: {file_id}")
-            _delete_tab(output_doc_id, existing_tabs[file_id])
-            tab_id = _create_tab(output_doc_id, file_id, full_content)
-            updated += 1
-        else:
-            logger.info(f"Creating tab for new doc: {file_id}")
-            tab_id = _create_tab(output_doc_id, file_id, full_content)
-            created += 1
+            if tab_exists:
+                logger.info(f"Updating tab for changed doc: {file_id}")
+                _delete_tab(output_doc_id, existing_tabs[file_id])
+                tab_id = _create_tab(output_doc_id, file_id, full_content)
+                updated += 1
+            else:
+                logger.info(f"Creating tab for new doc: {file_id}")
+                tab_id = _create_tab(output_doc_id, file_id, full_content)
+                created += 1
 
-        tab_states[file_id] = {
-            "tab_id": tab_id,
-            "source_mtime": str(info.local_mtime),
-        }
-
-    new_state = {
-        "last_run": datetime.now(timezone.utc).isoformat(),
-        "output_doc_id": output_doc_id,
-        "tabs": tab_states,
-    }
-    _write_consolidate_state(output_dir, new_state)
+            tab_states[file_id] = {
+                "tab_id": tab_id,
+                "source_mtime": str(info.local_mtime),
+            }
+            _write_consolidate_state(
+                output_dir,
+                {
+                    "last_run": datetime.now(timezone.utc).isoformat(),
+                    "output_doc_id": output_doc_id,
+                    "tabs": tab_states,
+                },
+            )
+        except GWSError:
+            failed += 1
+            logger.exception(f"Failed to consolidate doc: {file_id}")
 
     logger.info(
         f"Consolidation complete: "
-        f"{created} created, {updated} updated, {skipped} skipped"
+        f"{created} created, {updated} updated, "
+        f"{skipped} skipped, {failed} failed"
     )
 
     return (created, updated, skipped)
