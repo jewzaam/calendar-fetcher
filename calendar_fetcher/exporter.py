@@ -3,15 +3,34 @@
 """Exporter orchestration for calendar-fetcher."""
 
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timezone
 from pathlib import Path
 
 from calendar_fetcher import drive_client, meet_client, metadata
-from calendar_fetcher.config import EXPORT_MIME_MAP
+from calendar_fetcher.config import EXPORT_MIME_MAP, MAX_WORKERS
 from calendar_fetcher.gws import GWSError
 from calendar_fetcher.models import Artifact, CalendarEvent, MeetingRecord
 from calendar_fetcher.naming import build_filename, extract_date
 
 logger = logging.getLogger(__name__)
+
+
+def _is_local_fresh(output_path: Path, file_id: str) -> bool:
+    """Check if local file exists and is at least as new as the Drive version."""
+    if not output_path.exists():
+        return False
+    file_metadata = drive_client.get_file_metadata(file_id)
+    if not file_metadata or "modifiedTime" not in file_metadata:
+        return True  # can't determine, keep local
+    drive_mtime = datetime.fromisoformat(file_metadata["modifiedTime"])
+    if drive_mtime.tzinfo is None:
+        drive_mtime = drive_mtime.replace(tzinfo=timezone.utc)
+    local_mtime = datetime.fromtimestamp(output_path.stat().st_mtime, tz=timezone.utc)
+    if local_mtime >= drive_mtime:
+        return True
+    logger.info(f"Re-downloading updated file: {output_path.name}")
+    return False
 
 
 def process_artifact(
@@ -69,8 +88,8 @@ def process_artifact(
         if artifact.mime_type == "application/vnd.google-apps.document":
             # Google Docs: export directly as markdown
             output_path = output_dir / base_filename
-            if output_path.exists():
-                logger.debug(f"Skipping existing file: {output_path}")
+            if _is_local_fresh(output_path, file_id):
+                logger.debug(f"Skipping fresh file: {output_path}")
                 artifact.local_file = str(output_path)
             else:
                 result = drive_client.export_doc_as_markdown(file_id, str(output_path))
@@ -90,8 +109,8 @@ def process_artifact(
         elif artifact.mime_type == "application/vnd.google-apps.presentation":
             # Google Slides: export as PDF
             output_path = output_dir / base_filename
-            if output_path.exists():
-                logger.debug(f"Skipping existing file: {output_path}")
+            if _is_local_fresh(output_path, file_id):
+                logger.debug(f"Skipping fresh file: {output_path}")
                 artifact.local_file = str(output_path)
             else:
                 result = drive_client.export_slides_as_pdf(file_id, str(output_path))
@@ -138,8 +157,8 @@ def _process_google_sheet(
         )
         output_path = output_dir / filename
 
-        if output_path.exists():
-            logger.info(f"Skipping existing file: {output_path}")
+        if _is_local_fresh(output_path, file_id):
+            logger.debug(f"Skipping fresh file: {output_path}")
         else:
             result = drive_client.fetch_sheet_tab_data(
                 file_id, tab_name, str(output_path)
@@ -221,9 +240,19 @@ def process_events(
     output_dir.mkdir(parents=True, exist_ok=True)
     records = []
 
-    for event in events:
-        record = process_event(event, output_dir, dryrun=dryrun)
-        records.append(record)
+    failed_events = 0
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
+        futures = {
+            pool.submit(process_event, event, output_dir, dryrun=dryrun): event
+            for event in events
+        }
+        for future in as_completed(futures):
+            try:
+                records.append(future.result())
+            except Exception:
+                failed_events += 1
+                event = futures[future]
+                logger.exception(f"Unexpected error processing event: {event.summary}")
 
     # Print summary
     total_artifacts = sum(len(r.artifacts) for r in records)
@@ -236,7 +265,7 @@ def process_events(
         for a in r.artifacts
         if a.note is not None and a.note.startswith("Skipped:")
     )
-    failed = sum(
+    failed_artifacts = sum(
         1
         for r in records
         for a in r.artifacts
@@ -249,8 +278,10 @@ def process_events(
     ]
     if skipped:
         parts.append(f"{skipped} skipped")
-    if failed:
-        parts.append(f"{failed} failed")
+    if failed_artifacts:
+        parts.append(f"{failed_artifacts} failed")
+    if failed_events:
+        parts.append(f"{failed_events} events errored")
     logger.info(", ".join(parts) + ")")
 
     return records

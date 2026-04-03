@@ -24,7 +24,7 @@ def get_file_metadata(file_id: str) -> dict | None:
             "drive",
             "files",
             "get",
-            params={"fileId": file_id, "fields": "id,name,mimeType"},
+            params={"fileId": file_id, "fields": "id,name,mimeType,modifiedTime"},
         )
     except GWSError as e:
         logger.warning(f"Failed to access file {file_id}: {e}")
