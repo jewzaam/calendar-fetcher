@@ -10,6 +10,7 @@ build/
 .pytest_cache/
 .coverage
 htmlcov/
+fetch-*.sh
 
 # Mutation testing
 mutants/

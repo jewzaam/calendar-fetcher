@@ -169,12 +169,17 @@ def test_process_artifact_slides_pdf(tmp_path):
         assert result.local_file == str(output_path)
 
 
-def test_process_artifact_skip_existing(tmp_path, sample_artifact):
-    """Test that existing files are skipped."""
+def test_process_artifact_skip_fresh_existing(tmp_path, sample_artifact):
+    """Test that existing files are skipped when Drive version is not newer."""
     existing_file = tmp_path / "2025-04-15_team-sync_test-doc_doc123.md"
     existing_file.write_text("existing content")
 
     with patch("calendar_fetcher.exporter.drive_client") as mock_drive:
+        # Drive modifiedTime is older than local file
+        mock_drive.get_file_metadata.return_value = {
+            "modifiedTime": "2020-01-01T00:00:00Z",
+        }
+
         result = process_artifact(
             sample_artifact,
             tmp_path,
@@ -183,11 +188,69 @@ def test_process_artifact_skip_existing(tmp_path, sample_artifact):
             dryrun=False,
         )
 
-        # Should NOT call export since file exists
+        # Should NOT call export since local is fresh
         mock_drive.export_doc_as_markdown.assert_not_called()
         # File should remain unchanged
         assert existing_file.read_text() == "existing content"
         # local_file should be set to existing file
+        assert result.local_file == str(existing_file)
+
+
+def test_process_artifact_redownloads_when_drive_newer(tmp_path, sample_artifact):
+    """Test that existing file is re-downloaded when Drive version is newer."""
+    existing_file = tmp_path / "2025-04-15_team-sync_test-doc_doc123.md"
+    existing_file.write_text("old content")
+    # Set local mtime to a known old time
+    import os
+
+    os.utime(existing_file, (0, 946684800))  # 2000-01-01T00:00:00Z
+
+    with patch("calendar_fetcher.exporter.drive_client") as mock_drive:
+        # Drive modifiedTime is newer than local file
+        mock_drive.get_file_metadata.return_value = {
+            "modifiedTime": "2025-06-01T00:00:00Z",
+        }
+
+        def mock_export(file_id, output_path):
+            Path(output_path).write_text("# Updated Content")
+            return output_path
+
+        mock_drive.export_doc_as_markdown.side_effect = mock_export
+
+        result = process_artifact(
+            sample_artifact,
+            tmp_path,
+            date="2025-04-15",
+            meeting_title="Team Sync",
+            dryrun=False,
+        )
+
+        # Should call export since Drive is newer
+        mock_drive.export_doc_as_markdown.assert_called_once()
+        assert existing_file.read_text() == "# Updated Content"
+        assert result.local_file == str(existing_file)
+
+
+def test_process_artifact_keeps_local_when_metadata_unavailable(
+    tmp_path, sample_artifact
+):
+    """Test that existing file is kept when Drive metadata is unavailable."""
+    existing_file = tmp_path / "2025-04-15_team-sync_test-doc_doc123.md"
+    existing_file.write_text("existing content")
+
+    with patch("calendar_fetcher.exporter.drive_client") as mock_drive:
+        mock_drive.get_file_metadata.return_value = None
+
+        result = process_artifact(
+            sample_artifact,
+            tmp_path,
+            date="2025-04-15",
+            meeting_title="Team Sync",
+            dryrun=False,
+        )
+
+        # Should NOT call export — can't determine freshness, keep local
+        mock_drive.export_doc_as_markdown.assert_not_called()
         assert result.local_file == str(existing_file)
 
 
@@ -365,10 +428,10 @@ def test_process_events_returns_records(tmp_path):
 
         records = process_events(events, tmp_path, dryrun=False)
 
-        # Verify all events were processed
+        # Verify all events were processed (order may vary due to threading)
         assert len(records) == 2
-        assert records[0].event.event_id == "event1"
-        assert records[1].event.event_id == "event2"
+        event_ids = {r.event.event_id for r in records}
+        assert event_ids == {"event1", "event2"}
 
 
 def test_process_events_logs_progress(tmp_path, caplog):
