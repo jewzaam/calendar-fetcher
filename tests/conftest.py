@@ -2,6 +2,7 @@
 
 """Shared test fixtures and guards."""
 
+import builtins
 import multiprocessing
 import subprocess
 from pathlib import Path
@@ -61,3 +62,14 @@ def _block_real_filesystem(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
 
     for method in ("write_text", "write_bytes", "rename", "unlink", "rmdir", "mkdir"):
         monkeypatch.setattr(Path, method, _guard(getattr(Path, method)))
+
+    _orig_open = builtins.open
+
+    def _guarded_open(file, mode="r", *args, **kwargs):
+        if any(m in str(mode) for m in ("w", "a", "+")):
+            path = Path(file).resolve()
+            if not _is_allowed(path):
+                raise PermissionError(f"Test tried to write outside tmp_path: {path}")
+        return _orig_open(file, mode, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "open", _guarded_open)

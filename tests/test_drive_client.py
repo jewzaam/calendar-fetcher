@@ -130,24 +130,25 @@ class TestFetchSheetTabData:
     """Tests for fetch_sheet_tab_data function."""
 
     def test_fetch_sheet_tab_data_success(self, tmp_path):
-        """Verify exports sheet tab as CSV."""
+        """Verify exports sheet tab as CSV via Sheets values API."""
         output_path = tmp_path / "output.csv"
         mock_response = {}
 
         with patch(
             "calendar_fetcher.drive_client.run_gws", return_value=mock_response
         ) as mock_run:
-            # Create the file to simulate export
             output_path.write_text("col1,col2\nval1,val2\n")
             result = fetch_sheet_tab_data("sheet123", "Sheet1", str(output_path))
 
         assert result == str(output_path)
         mock_run.assert_called_once_with(
-            "drive",
-            "files",
-            "export",
-            params={"fileId": "sheet123", "mimeType": "text/csv"},
+            "sheets",
+            "spreadsheets",
+            "values",
+            "get",
+            params={"spreadsheetId": "sheet123", "range": "'Sheet1'"},
             output_file=str(output_path),
+            format="csv",
         )
 
     def test_fetch_sheet_tab_data_error(self, tmp_path):

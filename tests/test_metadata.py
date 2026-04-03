@@ -375,6 +375,28 @@ def test_write_fetch_state(tmp_path):
     datetime.fromisoformat(state["modified_on"])
 
 
+def test_write_fetch_state_preserves_other_keys(tmp_path):
+    """Verify write_fetch_state does not clobber other keys in state file."""
+    state = {
+        "modified_on": "2026-04-03T10:00:00+00:00",
+        "consolidate_state": {
+            "last_run": "2026-04-03T15:00:00Z",
+            "output_doc_id": "doc1",
+            "tabs": {"abc": {"tab_id": "t.1", "source_mtime": "123.0"}},
+        },
+    }
+    with open(tmp_path / "fetcher-state.json", "w") as f:
+        json.dump(state, f)
+
+    write_fetch_state(tmp_path)
+
+    with open(tmp_path / "fetcher-state.json") as f:
+        result = json.load(f)
+    assert "modified_on" in result
+    assert "consolidate_state" in result
+    assert result["consolidate_state"]["output_doc_id"] == "doc1"
+
+
 def test_read_fetch_state(tmp_path):
     """Test read_fetch_state returns date from state file."""
     from datetime import date

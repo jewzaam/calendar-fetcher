@@ -489,3 +489,61 @@ def test_date_and_lookback_days_mutually_exclusive():
 
     with pytest.raises(SystemExit):
         parser.parse_args(["fetch", "--date", "2026-03-28", "--lookback-days", "7"])
+
+
+def test_consolidate_subcommand_requires_output_doc_id():
+    """Verify consolidate requires --output-doc-id."""
+    parser = create_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args(["consolidate"])
+
+
+def test_consolidate_subcommand_parses_args():
+    """Verify consolidate parses all arguments."""
+    parser = create_parser()
+    args = parser.parse_args(
+        [
+            "consolidate",
+            "--output-doc-id",
+            "doc123",
+            "--output-dir",
+            "/tmp/artifacts",
+            "--debug",
+        ]
+    )
+    assert args.subcommand == "consolidate"
+    assert args.output_doc_id == "doc123"
+    assert args.output_dir == "/tmp/artifacts"
+    assert args.debug is True
+
+
+@patch("calendar_fetcher.__main__.consolidator")
+@patch("calendar_fetcher.__main__.check_auth_scopes")
+def test_handle_consolidate_calls_consolidator(
+    mock_check_auth, mock_consolidator, tmp_path
+):
+    """Verify handle_consolidate calls auth check and consolidator."""
+    from calendar_fetcher.__main__ import handle_consolidate
+
+    mock_consolidator.consolidate.return_value = (1, 0, 0)
+    args = argparse.Namespace(
+        output_doc_id="doc123", output_dir=str(tmp_path), quiet=True
+    )
+    handle_consolidate(args)
+    mock_check_auth.assert_called_once_with(consolidate=True)
+    mock_consolidator.consolidate.assert_called_once_with(tmp_path, "doc123")
+
+
+def test_handle_consolidate_exits_on_missing_dir(tmp_path):
+    """Verify handle_consolidate exits if output dir doesn't exist."""
+    from calendar_fetcher.__main__ import handle_consolidate
+
+    args = argparse.Namespace(
+        output_doc_id="doc123",
+        output_dir=str(tmp_path / "nonexistent"),
+        quiet=True,
+    )
+    with patch("calendar_fetcher.__main__.check_auth_scopes"):
+        with pytest.raises(SystemExit) as exc_info:
+            handle_consolidate(args)
+    assert exc_info.value.code == 1
