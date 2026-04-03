@@ -11,7 +11,7 @@ import types
 from datetime import date, timedelta
 from pathlib import Path
 
-from calendar_fetcher import calendar_client, config, exporter, metadata
+from calendar_fetcher import calendar_client, config, consolidator, exporter, metadata
 from calendar_fetcher.gws import check_auth_scopes, run_gws
 
 logger = logging.getLogger(__name__)
@@ -29,6 +29,34 @@ def _install_excepthook(*, logger: logging.Logger) -> None:
         logger.critical("uncaught exception", exc_info=(exc_type, exc_value, exc_tb))
 
     sys.excepthook = _hook
+
+
+def _add_common_args(parser: argparse.ArgumentParser) -> None:
+    """Add logging arguments shared by all subcommands."""
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="enable debug logging",
+    )
+    parser.add_argument(
+        "-q",
+        "--quiet",
+        action="store_true",
+        help="suppress info output",
+    )
+    parser.add_argument(
+        "--log-file",
+        help="write logs to file",
+    )
+
+
+def _add_output_dir_arg(parser: argparse.ArgumentParser) -> None:
+    """Add --output-dir argument shared by most subcommands."""
+    parser.add_argument(
+        "--output-dir",
+        default=config.DEFAULT_OUTPUT_DIR,
+        help="output directory (default: calendar-artifacts)",
+    )
 
 
 def create_parser() -> argparse.ArgumentParser:
@@ -51,11 +79,7 @@ def create_parser() -> argparse.ArgumentParser:
         default=config.DEFAULT_CALENDAR_ID,
         help="calendar identifier (default: primary)",
     )
-    fetch_parser.add_argument(
-        "--output-dir",
-        default=config.DEFAULT_OUTPUT_DIR,
-        help="output directory for artifacts (default: calendar-artifacts)",
-    )
+    _add_output_dir_arg(fetch_parser)
     date_group = fetch_parser.add_mutually_exclusive_group()
     date_group.add_argument(
         "--lookback-days",
@@ -72,25 +96,11 @@ def create_parser() -> argparse.ArgumentParser:
         help="upload to Drive folder",
     )
     fetch_parser.add_argument(
-        "--debug",
-        action="store_true",
-        help="enable debug logging",
-    )
-    fetch_parser.add_argument(
         "--dryrun",
         action="store_true",
         help="log what would happen but don't download",
     )
-    fetch_parser.add_argument(
-        "-q",
-        "--quiet",
-        action="store_true",
-        help="suppress info output",
-    )
-    fetch_parser.add_argument(
-        "--log-file",
-        help="write logs to file",
-    )
+    _add_common_args(fetch_parser)
 
     # refresh-metadata subcommand
     refresh_parser = subparsers.add_parser(
@@ -99,26 +109,8 @@ def create_parser() -> argparse.ArgumentParser:
         description="re-extract top-level fields from the raw api responses "
         "stored in .meta.json files without calling any Google APIs",
     )
-    refresh_parser.add_argument(
-        "--output-dir",
-        default=config.DEFAULT_OUTPUT_DIR,
-        help="output directory (default: calendar-artifacts)",
-    )
-    refresh_parser.add_argument(
-        "--debug",
-        action="store_true",
-        help="enable debug logging",
-    )
-    refresh_parser.add_argument(
-        "-q",
-        "--quiet",
-        action="store_true",
-        help="suppress info output",
-    )
-    refresh_parser.add_argument(
-        "--log-file",
-        help="write logs to file",
-    )
+    _add_output_dir_arg(refresh_parser)
+    _add_common_args(refresh_parser)
 
     # status subcommand
     status_parser = subparsers.add_parser(
@@ -127,26 +119,8 @@ def create_parser() -> argparse.ArgumentParser:
         description="scan the output directory and report how many meetings "
         "have been processed and how many artifacts downloaded",
     )
-    status_parser.add_argument(
-        "--output-dir",
-        default=config.DEFAULT_OUTPUT_DIR,
-        help="output directory (default: calendar-artifacts)",
-    )
-    status_parser.add_argument(
-        "--debug",
-        action="store_true",
-        help="enable debug logging",
-    )
-    status_parser.add_argument(
-        "-q",
-        "--quiet",
-        action="store_true",
-        help="suppress info output",
-    )
-    status_parser.add_argument(
-        "--log-file",
-        help="write logs to file",
-    )
+    _add_output_dir_arg(status_parser)
+    _add_common_args(status_parser)
 
     # list-calendars subcommand
     list_parser = subparsers.add_parser(
@@ -154,21 +128,22 @@ def create_parser() -> argparse.ArgumentParser:
         help="list available calendars",
         description="show all calendars accessible by the authenticated account",
     )
-    list_parser.add_argument(
-        "--debug",
-        action="store_true",
-        help="enable debug logging",
+    _add_common_args(list_parser)
+
+    # consolidate subcommand
+    consolidate_parser = subparsers.add_parser(
+        "consolidate",
+        help="push fetched google docs into a single output document",
+        description="consolidate fetched Google Docs into a single Google Doc "
+        "with one tab per source document, including meeting metadata headers",
     )
-    list_parser.add_argument(
-        "-q",
-        "--quiet",
-        action="store_true",
-        help="suppress info output",
+    consolidate_parser.add_argument(
+        "--output-doc-id",
+        required=True,
+        help="Google Doc ID to write tabs into",
     )
-    list_parser.add_argument(
-        "--log-file",
-        help="write logs to file",
-    )
+    _add_output_dir_arg(consolidate_parser)
+    _add_common_args(consolidate_parser)
 
     return parser
 
@@ -300,6 +275,24 @@ def handle_list_calendars(args: argparse.Namespace) -> None:
         print(f"{summary:<{col_width}}  {calendar_id}{primary}")
 
 
+def handle_consolidate(args: argparse.Namespace) -> None:
+    """Handle the consolidate subcommand."""
+    check_auth_scopes(consolidate=True)
+
+    output_dir = Path(args.output_dir)
+    if not output_dir.exists():
+        print(f"Error: Output directory does not exist: {output_dir}", file=sys.stderr)
+        raise SystemExit(config.EXIT_ERROR)
+
+    created, updated, skipped = consolidator.consolidate(output_dir, args.output_doc_id)
+
+    if not args.quiet:
+        print(
+            f"Consolidation complete: {created} created, "
+            f"{updated} updated, {skipped} skipped"
+        )
+
+
 def main() -> int:
     """Main entry point for the CLI."""
     parser = create_parser()
@@ -330,6 +323,8 @@ def main() -> int:
         handle_status(args)
     elif args.subcommand == "list-calendars":
         handle_list_calendars(args)
+    elif args.subcommand == "consolidate":
+        handle_consolidate(args)
 
     return config.EXIT_SUCCESS
 

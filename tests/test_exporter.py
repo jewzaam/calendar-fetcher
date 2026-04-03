@@ -296,6 +296,29 @@ def test_process_artifact_dryrun(tmp_path, sample_artifact, capsys):
         assert result.local_file is None
 
 
+def test_process_artifact_no_drive_file_id(tmp_path):
+    """Test that artifact without drive_file_id is skipped with note."""
+    artifact = Artifact(
+        type="attachment",
+        title="Missing ID Doc",
+        source_url="https://docs.google.com/document/d/unknown",
+        drive_file_id=None,
+        mime_type="application/vnd.google-apps.document",
+        source="attached",
+    )
+
+    result = process_artifact(
+        artifact,
+        tmp_path,
+        date="2025-04-15",
+        meeting_title="Team Sync",
+        dryrun=False,
+    )
+
+    assert result.note == "No drive file ID"
+    assert result.local_file is None
+
+
 def test_process_artifact_unsupported_mime(tmp_path):
     """Test that unsupported MIME type sets note."""
     artifact = Artifact(
@@ -432,6 +455,53 @@ def test_process_events_returns_records(tmp_path):
         assert len(records) == 2
         event_ids = {r.event.event_id for r in records}
         assert event_ids == {"event1", "event2"}
+
+
+def test_process_events_handles_event_exception(tmp_path, caplog):
+    """Test that one event raising doesn't block others."""
+    import logging
+
+    caplog.set_level(logging.ERROR)
+
+    events = [
+        CalendarEvent(
+            event_id="event_ok",
+            calendar_id="cal@example.com",
+            summary="Good Event",
+            start="2025-04-15T10:00:00Z",
+            end="2025-04-15T11:00:00Z",
+            api_response={},
+        ),
+        CalendarEvent(
+            event_id="event_bad",
+            calendar_id="cal@example.com",
+            summary="Bad Event",
+            start="2025-04-15T14:00:00Z",
+            end="2025-04-15T15:00:00Z",
+            api_response={},
+        ),
+    ]
+
+    from calendar_fetcher.models import MeetingRecord
+
+    def mock_process_event(event, output_dir, *, dryrun=False):
+        if event.event_id == "event_bad":
+            raise RuntimeError("API failure")
+        return MeetingRecord(event=event)
+
+    with (
+        patch(
+            "calendar_fetcher.exporter.process_event",
+            side_effect=mock_process_event,
+        ),
+    ):
+        records = process_events(events, tmp_path, dryrun=False)
+
+    # Only the successful event should be in records
+    assert len(records) == 1
+    assert records[0].event.event_id == "event_ok"
+    # Error should be logged
+    assert "bad event" in caplog.text.lower()
 
 
 def test_process_events_logs_progress(tmp_path, caplog):

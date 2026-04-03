@@ -102,19 +102,33 @@ def fetch_sheet_tabs(file_id: str) -> list[dict]:
 
 
 def fetch_sheet_tab_data(file_id: str, tab_name: str, output_path: str) -> str | None:
-    """Export a single sheet tab as CSV.
+    """Export a single sheet tab as CSV using the Sheets values API.
 
     Args:
         file_id: The spreadsheet ID
-        tab_name: The tab name (currently unused, exports entire sheet as CSV)
+        tab_name: The tab name to export
         output_path: Where to write the CSV file
 
     Returns:
         Output path on success, None on error
     """
-    return _export_file(
-        file_id, output_path, "text/csv", description=f"sheet tab {tab_name}"
-    )
+    try:
+        run_gws(
+            "sheets",
+            "spreadsheets",
+            "values",
+            "get",
+            params={
+                "spreadsheetId": file_id,
+                "range": f"'{tab_name}'",
+            },
+            output_file=output_path,
+            format="csv",
+        )
+        return output_path
+    except GWSError as e:
+        logger.warning(f"Failed to export sheet tab {tab_name} for {file_id}: {e}")
+        return None
 
 
 def export_slides_as_pdf(file_id: str, output_path: str) -> str | None:

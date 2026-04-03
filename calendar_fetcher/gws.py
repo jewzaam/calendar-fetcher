@@ -23,9 +23,39 @@ REQUIRED_SCOPE_URLS = {
 # For upload mode, drive needs read-write instead of readonly.
 DRIVE_WRITE_SCOPE = "https://www.googleapis.com/auth/drive"
 
+# For consolidate mode, docs needs read-write instead of readonly.
+DOCS_WRITE_SCOPE = "https://www.googleapis.com/auth/documents"
+
 
 class GWSError(Exception):
     """Raised when a gws CLI command fails."""
+
+
+def _run_gws_cmd(cmd: list[str], label: str) -> dict:
+    """Execute a gws command with timeout retry and JSON parsing."""
+    logger.debug(f"Running: {' '.join(cmd)}")
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+    except subprocess.TimeoutExpired:
+        raise GWSError(f"gws {label} timed out after 60 seconds")
+
+    if result.returncode != 0:
+        stderr_lower = result.stderr.lower()
+        if "timeout" in stderr_lower or "timed out" in stderr_lower:
+            logger.warning(f"Timeout on gws {label}, retrying once")
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+            except subprocess.TimeoutExpired:
+                raise GWSError(f"gws {label} timed out after 60 seconds")
+        if result.returncode != 0:
+            raise GWSError(
+                f"gws {label} failed (exit {result.returncode}): "
+                f"{result.stderr.strip()}"
+            )
+
+    if not result.stdout.strip():
+        return {}
+    return json.loads(result.stdout)
 
 
 def run_gws(
@@ -40,45 +70,42 @@ def run_gws(
         cmd.extend(["--params", json.dumps(params)])
     if output_file is not None:
         cmd.extend(["-o", output_file])
-
-    logger.debug(f"Running: {' '.join(cmd)}")
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-    except subprocess.TimeoutExpired:
-        raise GWSError(f"gws {' '.join(args)} timed out after 60 seconds")
-
-    if result.returncode != 0:
-        stderr_lower = result.stderr.lower()
-        if "timeout" in stderr_lower or "timed out" in stderr_lower:
-            logger.warning(f"Timeout on gws {' '.join(args)}, retrying once")
-            try:
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-            except subprocess.TimeoutExpired:
-                raise GWSError(f"gws {' '.join(args)} timed out after 60 seconds")
-        if result.returncode != 0:
-            raise GWSError(
-                f"gws {' '.join(args)} failed (exit {result.returncode}): "
-                f"{result.stderr.strip()}"
-            )
-
-    if not result.stdout.strip():
-        return {}
-    return json.loads(result.stdout)
+    return _run_gws_cmd(cmd, " ".join(args))
 
 
-def check_auth_scopes(*, upload: bool = False) -> None:
+def run_gws_write(
+    *args: str,
+    params: dict | None = None,
+    json_body: dict | None = None,
+    format: str = "json",
+) -> dict:
+    """Run a gws CLI command with a JSON request body (--json flag)."""
+    cmd = ["gws", *args, "--format", format]
+    if params is not None:
+        cmd.extend(["--params", json.dumps(params)])
+    if json_body is not None:
+        cmd.extend(["--json", json.dumps(json_body)])
+    return _run_gws_cmd(cmd, " ".join(args))
+
+
+def check_auth_scopes(*, upload: bool = False, consolidate: bool = False) -> None:
     """Verify gws auth has the required scopes. Exits on failure."""
     try:
         status = run_gws("auth", "status")
     except GWSError as e:
         print(f"Error: Cannot check auth status: {e}", file=sys.stderr)
-        _print_auth_help(upload=upload)
+        _print_auth_help(upload=upload, consolidate=consolidate)
         raise SystemExit(EXIT_ERROR)
 
     granted_scopes = set(status.get("scopes", []))
 
     missing = []
     for name, scope_url in REQUIRED_SCOPE_URLS.items():
+        # Special handling for docs in consolidate mode
+        if name == "docs" and consolidate:
+            if DOCS_WRITE_SCOPE not in granted_scopes:
+                missing.append("docs (read-write, currently readonly)")
+            continue
         # Special handling for drive in upload mode
         if name == "drive" and upload:
             # Need read-write scope, not readonly
@@ -93,15 +120,19 @@ def check_auth_scopes(*, upload: bool = False) -> None:
             f"Error: Missing required scopes: {', '.join(sorted(missing))}",
             file=sys.stderr,
         )
-        _print_auth_help(upload=upload)
+        _print_auth_help(upload=upload, consolidate=consolidate)
         raise SystemExit(EXIT_ERROR)
 
     logger.debug("Auth scopes verified")
 
 
-def _print_auth_help(*, upload: bool = False) -> None:
+def _print_auth_help(*, upload: bool = False, consolidate: bool = False) -> None:
     """Print gws auth login command with full scope URLs."""
     scopes = list(REQUIRED_SCOPE_URLS.values())
+    if consolidate:
+        scopes = [
+            DOCS_WRITE_SCOPE if s == REQUIRED_SCOPE_URLS["docs"] else s for s in scopes
+        ]
     if upload:
         # Replace drive.readonly with drive (read-write)
         scopes = [

@@ -8,7 +8,6 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 
 from calendar_fetcher.calendar_client import parse_event
-from calendar_fetcher.config import STATE_FILENAME
 from calendar_fetcher.models import MeetingRecord
 from calendar_fetcher.naming import extract_date, slugify
 
@@ -177,18 +176,17 @@ def refresh_all_metadata(output_dir: Path) -> int:
 
 
 def write_fetch_state(output_dir: Path) -> Path:
-    """Write fetch state with current UTC timestamp.
+    """Write fetch state with current UTC timestamp, preserving other keys.
 
     Returns the path to the state file.
     """
-    state_path = output_dir / STATE_FILENAME
-    state = {"modified_on": datetime.now(timezone.utc).isoformat()}
+    from calendar_fetcher.state import write_state_key
 
-    with open(state_path, "w", encoding="utf-8") as f:
-        json.dump(state, f, indent=2)
-
-    logger.debug(f"Wrote fetch state to {state_path}")
-    return state_path
+    path = write_state_key(
+        output_dir, "modified_on", datetime.now(timezone.utc).isoformat()
+    )
+    logger.debug(f"Wrote fetch state to {path}")
+    return path
 
 
 def read_fetch_state(output_dir: Path) -> date | None:
@@ -197,16 +195,13 @@ def read_fetch_state(output_dir: Path) -> date | None:
     Returns the date portion of modified_on, or None if the state file
     is missing or malformed.
     """
-    state_path = output_dir / STATE_FILENAME
-    if not state_path.exists():
-        return None
+    from calendar_fetcher.state import read_state_file
 
+    state = read_state_file(output_dir)
+    modified_on = state.get("modified_on")
+    if not modified_on:
+        return None
     try:
-        with open(state_path, encoding="utf-8") as f:
-            state = json.load(f)
-        modified_on = state.get("modified_on")
-        if not modified_on:
-            return None
         return datetime.fromisoformat(modified_on).date()
-    except (json.JSONDecodeError, ValueError, KeyError):
+    except (ValueError, TypeError):
         return None

@@ -65,6 +65,7 @@ When `--log-file` is set, logs go to a `RotatingFileHandler` (2MB, 1 backup) **i
 | `refresh-metadata` | Re-extract fields from stored API responses (no API calls) |
 | `status` | Count meetings and downloaded files |
 | `list-calendars` | Show accessible calendars |
+| `consolidate` | Push fetched Google Docs into a single output doc with tabs |
 
 ## File Layout
 

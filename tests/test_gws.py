@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from calendar_fetcher.gws import GWSError, check_auth_scopes, run_gws
+from calendar_fetcher.gws import GWSError, check_auth_scopes, run_gws, run_gws_write
 
 
 class TestRunGWS:
@@ -143,6 +143,84 @@ class TestRunGWS:
         assert "timed out after 60 seconds" in str(exc_info.value)
 
 
+class TestRunGWSWrite:
+    """Tests for run_gws_write function."""
+
+    def test_run_gws_write_includes_json_flag(self):
+        """Verify --json flag is added with serialized body."""
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = '{"replies": []}'
+        mock_result.stderr = ""
+
+        json_body = {
+            "requests": [{"addDocumentTab": {"tabProperties": {"title": "test"}}}]
+        }
+
+        with patch("subprocess.run", return_value=mock_result) as mock_run:
+            run_gws_write(
+                "docs",
+                "documents",
+                "batchUpdate",
+                json_body=json_body,
+                params={"documentId": "doc123"},
+            )
+
+        call_args = mock_run.call_args[0][0]
+        assert "--json" in call_args
+        json_index = call_args.index("--json")
+        assert json.loads(call_args[json_index + 1]) == json_body
+        assert "--params" in call_args
+
+    def test_run_gws_write_without_params(self):
+        """Verify run_gws_write works without params."""
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = '{"replies": [{}]}'
+        mock_result.stderr = ""
+
+        with patch("subprocess.run", return_value=mock_result) as mock_run:
+            result = run_gws_write(
+                "docs", "documents", "batchUpdate", json_body={"requests": []}
+            )
+
+        assert result == {"replies": [{}]}
+        call_args = mock_run.call_args[0][0]
+        assert "--params" not in call_args
+
+    def test_run_gws_write_raises_on_error(self):
+        """Verify GWSError raised on non-zero exit."""
+        mock_result = MagicMock()
+        mock_result.returncode = 1
+        mock_result.stdout = ""
+        mock_result.stderr = "Error: Permission denied"
+
+        with patch("subprocess.run", return_value=mock_result):
+            with pytest.raises(GWSError):
+                run_gws_write(
+                    "docs", "documents", "batchUpdate", json_body={"requests": []}
+                )
+
+    def test_run_gws_write_retries_on_timeout(self):
+        """Verify retry behavior when stderr contains 'timeout'."""
+        fail_result = MagicMock()
+        fail_result.returncode = 1
+        fail_result.stdout = ""
+        fail_result.stderr = "Error: Request timed out"
+
+        success_result = MagicMock()
+        success_result.returncode = 0
+        success_result.stdout = '{"replies": []}'
+        success_result.stderr = ""
+
+        with patch("subprocess.run", side_effect=[fail_result, success_result]):
+            result = run_gws_write(
+                "docs", "documents", "batchUpdate", json_body={"requests": []}
+            )
+
+        assert result == {"replies": []}
+
+
 class TestCheckAuthScopes:
     """Tests for check_auth_scopes function."""
 
@@ -228,3 +306,44 @@ class TestCheckAuthScopes:
         with patch("subprocess.run", return_value=mock_result):
             # Should not raise
             check_auth_scopes(upload=True)
+
+    def test_check_auth_scopes_consolidate_needs_docs_write(self):
+        """Verify consolidate=True fails if docs is readonly."""
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = json.dumps(
+            {
+                "scopes": [
+                    "https://www.googleapis.com/auth/calendar.readonly",
+                    "https://www.googleapis.com/auth/documents.readonly",
+                    "https://www.googleapis.com/auth/drive.readonly",
+                    "https://www.googleapis.com/auth/meetings.space.readonly",
+                ]
+            }
+        )
+        mock_result.stderr = ""
+
+        with patch("subprocess.run", return_value=mock_result):
+            with pytest.raises(SystemExit) as exc_info:
+                check_auth_scopes(consolidate=True)
+
+        assert exc_info.value.code == 1
+
+    def test_check_auth_scopes_consolidate_passes_with_docs_write(self):
+        """Verify consolidate=True passes when docs write scope present."""
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = json.dumps(
+            {
+                "scopes": [
+                    "https://www.googleapis.com/auth/calendar.readonly",
+                    "https://www.googleapis.com/auth/documents",
+                    "https://www.googleapis.com/auth/drive.readonly",
+                    "https://www.googleapis.com/auth/meetings.space.readonly",
+                ]
+            }
+        )
+        mock_result.stderr = ""
+
+        with patch("subprocess.run", return_value=mock_result):
+            check_auth_scopes(consolidate=True)
