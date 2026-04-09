@@ -73,9 +73,10 @@ def build_index_entry(metadata: dict, metadata_file: str) -> dict:
     Returns dict with date, summary, event_id, metadata_file, and
     list of downloaded files.
     """
+    artifacts = [_normalize_artifact(a) for a in metadata["artifacts"]]
     downloaded_files = [
         artifact["local_file"]
-        for artifact in metadata["artifacts"]
+        for artifact in artifacts
         if artifact.get("local_file") is not None
     ]
 
@@ -88,17 +89,45 @@ def build_index_entry(metadata: dict, metadata_file: str) -> dict:
     }
 
 
+def _normalize_artifact(artifact) -> dict:
+    """Normalize an artifact entry to a dict.
+
+    String entries (bare file paths from external tools like meet-checkpoints)
+    are converted to a dict.  Dict entries are returned as-is.
+    """
+    if isinstance(artifact, str):
+        return {
+            "type": "checkpoint",
+            "local_file": artifact,
+            "source": "meet-checkpoints",
+        }
+    return artifact
+
+
 def _merge_artifacts(existing: list[dict], incoming: list[dict]) -> list[dict]:
     """Merge incoming artifacts into existing, keyed by source_url.
 
     Existing artifacts not present in incoming are preserved.
     Incoming artifacts with a matching source_url replace the existing entry.
     Incoming artifacts with no match are appended.
+
+    String entries in either list are normalized to dicts first.
+    Artifacts without a source_url (e.g. normalized checkpoint strings)
+    are always preserved and not subject to URL-based dedup.
     """
-    by_url = {a["source_url"]: a for a in existing}
+    existing = [_normalize_artifact(a) for a in existing]
+    incoming = [_normalize_artifact(a) for a in incoming]
+
+    by_url = {a["source_url"]: a for a in existing if "source_url" in a}
+    no_url = [a for a in existing if "source_url" not in a]
+
     for artifact in incoming:
-        by_url[artifact["source_url"]] = artifact
-    return list(by_url.values())
+        if "source_url" in artifact:
+            by_url[artifact["source_url"]] = artifact
+        else:
+            no_url.append(artifact)
+
+    return list(by_url.values()) + no_url
 
 
 def write_metadata(metadata: dict, output_dir: Path, filename: str) -> Path:

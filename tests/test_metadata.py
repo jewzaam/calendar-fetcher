@@ -8,6 +8,7 @@ import pytest
 
 from calendar_fetcher.metadata import (
     _merge_artifacts,
+    _normalize_artifact,
     build_and_write_index,
     build_index_entry,
     build_meeting_metadata,
@@ -541,3 +542,129 @@ def test_read_fetch_state_missing_field(tmp_path):
     result = read_fetch_state(tmp_path)
 
     assert result is None
+
+
+def test_normalize_artifact_string():
+    """String artifact is normalized to a checkpoint dict."""
+    result = _normalize_artifact("2026-03-15_weekly-sync_checkpoint.md")
+    assert result == {
+        "type": "checkpoint",
+        "local_file": "2026-03-15_weekly-sync_checkpoint.md",
+        "source": "meet-checkpoints",
+    }
+
+
+def test_normalize_artifact_dict_passthrough():
+    """Dict artifact is returned unchanged."""
+    original = {"type": "transcript", "title": "T", "source_url": "https://x"}
+    result = _normalize_artifact(original)
+    assert result is original
+
+
+def test_merge_artifacts_with_string_entries():
+    """String entries in existing artifacts don't crash the merge."""
+    existing = [
+        "path/to/checkpoint.md",
+        {"type": "transcript", "title": "T", "source_url": "https://t"},
+    ]
+    incoming = [
+        {"type": "attachment", "title": "A", "source_url": "https://a"},
+    ]
+    merged = _merge_artifacts(existing, incoming)
+    assert len(merged) == 3
+    # The string was normalized
+    checkpoint = [a for a in merged if a["type"] == "checkpoint"]
+    assert len(checkpoint) == 1
+    assert checkpoint[0]["local_file"] == "path/to/checkpoint.md"
+
+
+def test_merge_artifacts_string_entries_preserved_across_merge():
+    """String artifacts without source_url are always preserved."""
+    existing = ["file1.md", "file2.md"]
+    incoming = [
+        {"type": "transcript", "title": "T", "source_url": "https://t"},
+    ]
+    merged = _merge_artifacts(existing, incoming)
+    assert len(merged) == 3
+    local_files = [a.get("local_file") for a in merged]
+    assert "file1.md" in local_files
+    assert "file2.md" in local_files
+
+
+def test_build_index_entry_with_string_artifacts():
+    """build_index_entry handles string artifacts without crashing."""
+    metadata = {
+        "event_id": "evt1",
+        "summary": "Test Meeting",
+        "start": "2026-03-15T10:00:00Z",
+        "artifacts": [
+            "path/to/checkpoint.md",
+            {
+                "type": "transcript",
+                "title": "Transcript",
+                "source_url": "https://t",
+                "local_file": "transcript.md",
+            },
+        ],
+    }
+    entry = build_index_entry(metadata, "test.meta.json")
+    assert "path/to/checkpoint.md" in entry["downloaded_files"]
+    assert "transcript.md" in entry["downloaded_files"]
+    assert len(entry["downloaded_files"]) == 2
+
+
+def test_build_and_write_index_with_string_artifacts(tmp_path):
+    """build_and_write_index survives .meta.json files with string artifacts."""
+    meta = {
+        "event_id": "evt1",
+        "summary": "Meeting",
+        "start": "2026-03-15T10:00:00Z",
+        "artifacts": [
+            "checkpoint.md",
+            {"type": "doc", "title": "D", "source_url": "https://d"},
+        ],
+    }
+    with open(tmp_path / "test.meta.json", "w") as f:
+        json.dump(meta, f)
+
+    index_path = build_and_write_index(tmp_path)
+
+    with open(index_path) as f:
+        index = json.load(f)
+    assert len(index) == 1
+    assert "checkpoint.md" in index[0]["downloaded_files"]
+
+
+def test_write_metadata_merges_with_string_artifacts(tmp_path):
+    """write_metadata merges when existing file has string artifacts."""
+    filename = "test.meta.json"
+    initial = {
+        "event_id": "evt1",
+        "summary": "Meeting",
+        "start": "2026-03-15T10:00:00Z",
+        "artifacts": [
+            "checkpoint.md",
+            {"type": "external", "title": "E", "source_url": "https://e"},
+        ],
+    }
+    with open(tmp_path / filename, "w") as f:
+        json.dump(initial, f)
+
+    new_metadata = {
+        "event_id": "evt1",
+        "summary": "Meeting",
+        "start": "2026-03-15T10:00:00Z",
+        "artifacts": [
+            {"type": "transcript", "title": "T", "source_url": "https://t"},
+        ],
+    }
+    write_metadata(new_metadata, tmp_path, filename)
+
+    with open(tmp_path / filename) as f:
+        result = json.load(f)
+
+    assert len(result["artifacts"]) == 3
+    types = [a["type"] for a in result["artifacts"]]
+    assert "checkpoint" in types
+    assert "external" in types
+    assert "transcript" in types
