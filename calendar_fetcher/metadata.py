@@ -88,14 +88,53 @@ def build_index_entry(metadata: dict, metadata_file: str) -> dict:
     }
 
 
+def _merge_artifacts(existing: list[dict], incoming: list[dict]) -> list[dict]:
+    """Merge incoming artifacts into existing, keyed by source_url.
+
+    Existing artifacts not present in incoming are preserved.
+    Incoming artifacts with a matching source_url replace the existing entry.
+    Incoming artifacts with no match are appended.
+    """
+    by_url = {a["source_url"]: a for a in existing}
+    for artifact in incoming:
+        by_url[artifact["source_url"]] = artifact
+    return list(by_url.values())
+
+
 def write_metadata(metadata: dict, output_dir: Path, filename: str) -> Path:
     """Write metadata dict as JSON to output_dir/filename.
+
+    If the file already exists, merges into it: top-level scalar fields
+    are updated, artifacts are merged by source_url, and api_responses
+    are dict-merged.  This preserves artifact entries added by other tools.
 
     Creates output_dir if it doesn't exist.
     Returns the path written.
     """
     output_dir.mkdir(parents=True, exist_ok=True)
     output_path = output_dir / filename
+
+    if output_path.exists():
+        try:
+            with open(output_path, encoding="utf-8") as f:
+                existing = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            existing = {}
+
+        # Merge artifacts by source_url
+        if "artifacts" in existing and "artifacts" in metadata:
+            metadata["artifacts"] = _merge_artifacts(
+                existing["artifacts"], metadata["artifacts"]
+            )
+
+        # Merge api_responses dicts
+        if "api_responses" in existing and "api_responses" in metadata:
+            merged_api = {**existing["api_responses"], **metadata["api_responses"]}
+            metadata["api_responses"] = merged_api
+
+        # Overlay new metadata onto existing, preserving unknown keys
+        existing.update(metadata)
+        metadata = existing
 
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(metadata, f, indent=2)
