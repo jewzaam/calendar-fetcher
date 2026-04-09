@@ -7,6 +7,7 @@ import json
 import pytest
 
 from calendar_fetcher.metadata import (
+    _merge_artifacts,
     build_and_write_index,
     build_index_entry,
     build_meeting_metadata,
@@ -235,6 +236,111 @@ def test_write_metadata_creates_directory(tmp_path):
 
     assert written_path.exists()
     assert output_dir.exists()
+
+
+def test_merge_artifacts_preserves_existing():
+    """Existing artifacts not in incoming are kept."""
+    existing = [
+        {"type": "attachment", "title": "A", "source_url": "https://a"},
+        {"type": "transcript", "title": "B", "source_url": "https://b"},
+    ]
+    incoming = [
+        {"type": "attachment", "title": "C", "source_url": "https://c"},
+    ]
+    merged = _merge_artifacts(existing, incoming)
+    urls = [a["source_url"] for a in merged]
+    assert "https://a" in urls
+    assert "https://b" in urls
+    assert "https://c" in urls
+    assert len(merged) == 3
+
+
+def test_merge_artifacts_updates_matching():
+    """Incoming artifact with same source_url replaces existing."""
+    existing = [
+        {
+            "type": "attachment",
+            "title": "Old",
+            "source_url": "https://a",
+            "note": "old",
+        },
+    ]
+    incoming = [
+        {
+            "type": "attachment",
+            "title": "New",
+            "source_url": "https://a",
+            "local_file": "a.md",
+        },
+    ]
+    merged = _merge_artifacts(existing, incoming)
+    assert len(merged) == 1
+    assert merged[0]["title"] == "New"
+    assert merged[0]["local_file"] == "a.md"
+    assert "note" not in merged[0]
+
+
+def test_write_metadata_merges_existing(tmp_path):
+    """write_metadata merges into an existing file instead of overwriting."""
+    filename = "test.meta.json"
+
+    # Write initial metadata with an extra artifact from another tool
+    initial = {
+        "event_id": "evt1",
+        "summary": "Meeting",
+        "start": "2026-03-15T10:00:00Z",
+        "custom_key": "preserve_me",
+        "artifacts": [
+            {"type": "external", "title": "Extra", "source_url": "https://extra"},
+        ],
+        "api_responses": {"calendar": {"id": "evt1"}},
+    }
+    with open(tmp_path / filename, "w") as f:
+        json.dump(initial, f)
+
+    # Now write new metadata from calendar-fetcher
+    new_metadata = {
+        "event_id": "evt1",
+        "summary": "Meeting (updated)",
+        "start": "2026-03-15T10:00:00Z",
+        "artifacts": [
+            {
+                "type": "transcript",
+                "title": "Transcript",
+                "source_url": "https://transcript",
+            },
+        ],
+        "api_responses": {"meet": {"conferenceId": "abc"}},
+    }
+    write_metadata(new_metadata, tmp_path, filename)
+
+    with open(tmp_path / filename) as f:
+        result = json.load(f)
+
+    # Top-level fields updated
+    assert result["summary"] == "Meeting (updated)"
+    # Unknown keys preserved
+    assert result["custom_key"] == "preserve_me"
+    # Both artifacts present
+    urls = [a["source_url"] for a in result["artifacts"]]
+    assert "https://extra" in urls
+    assert "https://transcript" in urls
+    # api_responses merged
+    assert "calendar" in result["api_responses"]
+    assert "meet" in result["api_responses"]
+
+
+def test_write_metadata_handles_corrupt_existing(tmp_path):
+    """write_metadata treats a corrupt existing file as empty."""
+    filename = "test.meta.json"
+    (tmp_path / filename).write_text("not json", encoding="utf-8")
+
+    metadata = {"event_id": "evt1", "artifacts": []}
+    write_metadata(metadata, tmp_path, filename)
+
+    with open(tmp_path / filename) as f:
+        result = json.load(f)
+    assert result["event_id"] == "evt1"
 
 
 def test_build_and_write_index(tmp_path, sample_meeting):
