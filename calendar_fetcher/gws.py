@@ -36,8 +36,8 @@ _QUOTA_BACKOFF_SCHEDULE = [5, 10, 15]
 _MAX_QUOTA_RETRIES = 10
 
 
-def _run_gws_cmd(cmd: list[str], label: str) -> dict:
-    """Execute a gws command with timeout retry, quota backoff, and JSON parsing."""
+def _run_gws_cmd(cmd: list[str], label: str, *, parse_json: bool = True) -> dict:
+    """Execute a gws command with retry, backoff, and optional parsing."""
     for attempt in range(_MAX_QUOTA_RETRIES + 1):
         logger.debug(f"Running: {' '.join(cmd)}")
         try:
@@ -78,6 +78,8 @@ def _run_gws_cmd(cmd: list[str], label: str) -> dict:
 
         if not result.stdout.strip():
             return {}
+        if not parse_json:
+            return {"raw": result.stdout}
         return json.loads(result.stdout)
 
     raise GWSError(f"gws {label} failed after {_MAX_QUOTA_RETRIES} quota retries")
@@ -95,7 +97,7 @@ def run_gws(
         cmd.extend(["--params", json.dumps(params)])
     if output_file is not None:
         cmd.extend(["-o", output_file])
-    return _run_gws_cmd(cmd, " ".join(args))
+    return _run_gws_cmd(cmd, " ".join(args), parse_json=(format == "json"))
 
 
 def run_gws_write(
@@ -110,7 +112,7 @@ def run_gws_write(
         cmd.extend(["--params", json.dumps(params)])
     if json_body is not None:
         cmd.extend(["--json", json.dumps(json_body)])
-    return _run_gws_cmd(cmd, " ".join(args))
+    return _run_gws_cmd(cmd, " ".join(args), parse_json=(format == "json"))
 
 
 def check_auth_scopes(*, upload: bool = False, consolidate: bool = False) -> None:
