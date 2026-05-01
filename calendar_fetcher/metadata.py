@@ -224,8 +224,12 @@ def refresh_all_metadata(output_dir: Path) -> int:
             continue
 
         # Extract updated fields from calendar API response via parse_event
-        calendar_response = metadata["api_responses"]["calendar"]
-        parsed = parse_event(calendar_response, metadata["calendar_id"])
+        api_responses = metadata.get("api_responses", {})
+        calendar_response = api_responses.get("calendar")
+        if not calendar_response:
+            logger.debug(f"Skipping {meta_file.name}: no calendar API response")
+            continue
+        parsed = parse_event(calendar_response, metadata.get("calendar_id", ""))
 
         metadata["summary"] = parsed.summary
         metadata["start"] = parsed.start

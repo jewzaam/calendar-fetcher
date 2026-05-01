@@ -531,3 +531,150 @@ def test_process_events_logs_progress(tmp_path, caplog):
 
         # Verify progress was logged
         assert "test event" in caplog.text.lower() or "event1" in caplog.text.lower()
+
+
+MULTI_DATE_DOC = """\
+# Meeting Notes
+
+Standing topics here.
+
+## Apr 15, 2025 | [Team Sync](https://meet.google.com/abc)
+
+Notes for April 15.
+
+---
+
+## Apr 8, 2025 | [Team Sync](https://meet.google.com/abc)
+
+Notes for April 8."""
+
+
+def test_section_extraction_on_export(tmp_path, sample_artifact):
+    """Section extraction runs after Google Doc export and slices content."""
+    with patch("calendar_fetcher.exporter.drive_client") as mock_drive:
+
+        def mock_export(file_id, output_path):
+            Path(output_path).write_text(MULTI_DATE_DOC)
+            return output_path
+
+        mock_drive.export_doc_as_markdown.side_effect = mock_export
+
+        artifact = process_artifact(
+            sample_artifact,
+            tmp_path,
+            date="2025-04-15",
+            meeting_title="Team Sync",
+            dryrun=False,
+        )
+
+        content = Path(artifact.local_file).read_text()
+        assert "Apr 15, 2025" in content
+        assert "Notes for April 15" in content
+        assert "Apr 8, 2025" not in content
+        assert "Standing topics" in content
+
+
+def test_section_extraction_on_fresh_skip(tmp_path, sample_artifact):
+    """Section extraction runs even when file is skipped as fresh."""
+    expected_path = tmp_path / "2025-04-15_team-sync_test-doc_doc123.md"
+    expected_path.write_text(MULTI_DATE_DOC)
+
+    with patch("calendar_fetcher.exporter.drive_client") as mock_drive:
+        mock_drive.get_file_metadata.return_value = {
+            "modifiedTime": "2020-01-01T00:00:00Z",
+        }
+
+        artifact = process_artifact(
+            sample_artifact,
+            tmp_path,
+            date="2025-04-15",
+            meeting_title="Team Sync",
+            dryrun=False,
+        )
+
+        mock_drive.export_doc_as_markdown.assert_not_called()
+        content = Path(artifact.local_file).read_text()
+        assert "Apr 15, 2025" in content
+        assert "Apr 8, 2025" not in content
+
+
+def test_section_extraction_not_applied_to_sheets(tmp_path):
+    """Section extraction does not run for Google Sheets."""
+    artifact = Artifact(
+        type="attachment",
+        title="Sheet",
+        source_url="https://docs.google.com/spreadsheets/d/sheet1",
+        drive_file_id="sheet1",
+        mime_type="application/vnd.google-apps.spreadsheet",
+        source="attached",
+    )
+
+    with patch("calendar_fetcher.exporter.drive_client") as mock_drive:
+        mock_drive.fetch_sheet_tabs.return_value = [{"title": "Tab1"}]
+
+        def mock_fetch_tab(file_id, tab_name, output_path):
+            Path(output_path).write_text("## Apr 15, 2025\ndata\n## Apr 8, 2025\ndata")
+            return output_path
+
+        mock_drive.fetch_sheet_tab_data.side_effect = mock_fetch_tab
+
+        artifact = process_artifact(
+            artifact,
+            tmp_path,
+            date="2025-04-15",
+            meeting_title="Team Sync",
+            dryrun=False,
+        )
+
+        content = Path(artifact.local_file).read_text()
+        assert "Apr 8, 2025" in content  # full content preserved
+
+
+def test_section_extraction_exception_keeps_full_content(tmp_path, sample_artifact):
+    """Section extraction failure preserves full doc content."""
+    with (
+        patch("calendar_fetcher.exporter.drive_client") as mock_drive,
+        patch(
+            "calendar_fetcher.exporter.section_extractor.extract_section",
+            side_effect=RuntimeError("parse error"),
+        ),
+    ):
+
+        def mock_export(file_id, output_path):
+            Path(output_path).write_text(MULTI_DATE_DOC)
+            return output_path
+
+        mock_drive.export_doc_as_markdown.side_effect = mock_export
+
+        artifact = process_artifact(
+            sample_artifact,
+            tmp_path,
+            date="2025-04-15",
+            meeting_title="Team Sync",
+            dryrun=False,
+        )
+
+        content = Path(artifact.local_file).read_text()
+        assert content == MULTI_DATE_DOC
+
+
+def test_section_extraction_no_match_keeps_full(tmp_path, sample_artifact):
+    """When target date has no matching heading, full content is preserved."""
+    with patch("calendar_fetcher.exporter.drive_client") as mock_drive:
+
+        def mock_export(file_id, output_path):
+            Path(output_path).write_text(MULTI_DATE_DOC)
+            return output_path
+
+        mock_drive.export_doc_as_markdown.side_effect = mock_export
+
+        artifact = process_artifact(
+            sample_artifact,
+            tmp_path,
+            date="2025-05-01",
+            meeting_title="Team Sync",
+            dryrun=False,
+        )
+
+        content = Path(artifact.local_file).read_text()
+        assert content == MULTI_DATE_DOC
