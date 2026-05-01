@@ -13,6 +13,7 @@ CLI (__main__.py)
           └─ per event:
                ├─ meet_client.get_all_meet_data  (transcripts, recordings, participants)
                ├─ drive_client.*                  (export docs/sheets/slides)
+               ├─ section_extractor.extract_section  (slice meeting notes by date)
                └─ metadata.write_metadata         (.meta.json sidecar)
 ```
 
@@ -39,6 +40,19 @@ Calendar attendees and Meet participants are **different data** from different A
 
 Meet participants have no email — only a display name and numeric user ID. Calendar attendees have no join/leave times.
 
+### Meeting notes section extraction
+
+Many recurring meetings keep all instance notes in a single Google Doc, with date headings (e.g., `## Apr 30, 2026 | Meeting Title`) separating each instance. After exporting a Google Doc as markdown, `section_extractor.extract_section` detects this date-heading structure and extracts only the section matching the calendar event date, plus any preamble content above the first date heading (standing topics, attendee lists, etc.).
+
+Behavior:
+- Auto-detects heading level by finding the level with the most parseable date headings
+- Supports abbreviated month (`Apr 30, 2026`), full month (`April 30, 2026`), and ISO (`2026-04-30`) date formats via `date_utils.parse_human_date`
+- Strips markdown formatting (`~~strikethrough~~`, bold, italic) before parsing dates
+- Falls back to full content if no date structure is detected or the target date has no match
+- Idempotent: re-running extraction on already-extracted content returns the same result
+- Applied on both fresh exports and fresh-skipped files for consistency across upgrades
+- `refresh-metadata` applies section extraction to all existing markdown files using dates from `.meta.json` sidecars — use this to backfill previously fetched data without re-downloading
+
 ### Pagination
 
 Google API list endpoints have default page size limits (Calendar: 250, Meet participants: 25). `calendar_client.list_events` handles pagination via `nextPageToken`. Other list calls (`meet_client.get_participants`, `drive_client.list_folder_files`) do not yet paginate — low risk for typical usage but will silently truncate if limits are exceeded.
@@ -62,7 +76,7 @@ When `--log-file` is set, logs go to a `RotatingFileHandler` (2MB, 1 backup) **i
 | Command | Purpose |
 |---------|---------|
 | `fetch` | Query calendar, download artifacts, write metadata |
-| `refresh-metadata` | Re-extract fields from stored API responses (no API calls) |
+| `refresh-metadata` | Re-extract fields from stored API responses and apply section extraction (no API calls) |
 | `status` | Count meetings and downloaded files |
 | `list-calendars` | Show accessible calendars |
 | `consolidate` | Push fetched Google Docs into a single output doc with tabs |

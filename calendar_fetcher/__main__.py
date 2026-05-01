@@ -222,10 +222,14 @@ def handle_refresh_metadata(args: argparse.Namespace) -> None:
     """Handle the refresh-metadata subcommand."""
     output_dir = Path(args.output_dir)
     count = metadata.refresh_all_metadata(output_dir)
+    extracted = exporter.apply_section_extraction_to_dir(output_dir)
     metadata.build_and_write_index(output_dir)
 
     if not args.quiet:
-        print(f"Refreshed {count} metadata files")
+        parts = [f"Refreshed {count} metadata files"]
+        if extracted:
+            parts.append(f"{extracted} sections extracted")
+        print(", ".join(parts))
 
 
 def handle_status(args: argparse.Namespace) -> None:

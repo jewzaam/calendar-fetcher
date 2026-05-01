@@ -2,12 +2,13 @@
 
 """Exporter orchestration for calendar-fetcher."""
 
+import json
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 
-from calendar_fetcher import drive_client, meet_client, metadata
+from calendar_fetcher import drive_client, meet_client, metadata, section_extractor
 from calendar_fetcher.config import EXPORT_MIME_MAP, MAX_WORKERS
 from calendar_fetcher.gws import GWSError
 from calendar_fetcher.models import Artifact, CalendarEvent, MeetingRecord
@@ -31,6 +32,27 @@ def _is_local_fresh(output_path: Path, file_id: str) -> bool:
         return True
     logger.info(f"Re-downloading updated file: {output_path.name}")
     return False
+
+
+def _apply_section_extraction(output_path: Path, event_date: str) -> None:
+    """Extract the date-specific section from an exported meeting notes file.
+
+    Reads the file, attempts to detect date-heading structure and extract the
+    section matching event_date. Overwrites only if extraction produced
+    different (shorter) content. No-op if no date structure is detected or
+    the target date is not found.
+    """
+    try:
+        content = output_path.read_text(encoding="utf-8")
+        extracted = section_extractor.extract_section(content, event_date)
+        if extracted is not None and extracted != content:
+            output_path.write_text(extracted, encoding="utf-8")
+            logger.info(f"Extracted section for {event_date} from {output_path.name}")
+    except Exception:
+        logger.warning(
+            f"Section extraction failed for {output_path.name}, keeping full content",
+            exc_info=True,
+        )
 
 
 def process_artifact(
@@ -98,6 +120,8 @@ def process_artifact(
                     artifact.local_file = str(output_path)
                 else:
                     artifact.note = "Failed to export doc as markdown"
+            if artifact.local_file:
+                _apply_section_extraction(Path(artifact.local_file), date)
 
         elif artifact.mime_type == "application/vnd.google-apps.spreadsheet":
             # Google Sheets: export each tab as CSV
@@ -285,3 +309,42 @@ def process_events(
     logger.info(", ".join(parts) + ")")
 
     return records
+
+
+def apply_section_extraction_to_dir(output_dir: Path) -> int:
+    """Apply section extraction to all Google Doc markdown files in a directory.
+
+    Reads .meta.json files to find artifacts with local_file paths, extracts the
+    event date from the metadata, and applies section extraction to each file.
+
+    Returns count of files where extraction was applied.
+    """
+    count = 0
+    for meta_file in sorted(output_dir.glob("*.meta.json")):
+        try:
+            with open(meta_file, encoding="utf-8") as f:
+                meta = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            logger.warning(f"Skipping malformed metadata: {meta_file}")
+            continue
+
+        event_date = extract_date(meta.get("start", ""))
+        if not event_date:
+            continue
+
+        for artifact in meta.get("artifacts", []):
+            if not isinstance(artifact, dict):
+                continue
+            local_file = artifact.get("local_file")
+            if not local_file:
+                continue
+            path = Path(local_file)
+            if not path.exists() or not path.suffix == ".md":
+                continue
+
+            before = path.read_text(encoding="utf-8")
+            _apply_section_extraction(path, event_date)
+            if path.read_text(encoding="utf-8") != before:
+                count += 1
+
+    return count
